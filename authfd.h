@@ -49,6 +49,19 @@
 #define SSH2_AGENTC_ADD_ID_CONSTRAINED		25
 #define SSH_AGENTC_ADD_SMARTCARD_KEY_CONSTRAINED 26
 
+/* ssh-store commands */
+#define SSH_AGENTC_SET_VARIABLE			40
+#define SSH_AGENT_VARIABLE_REPLACED		41
+#define SSH_AGENTC_GET_VARIABLE			42
+#define SSH_AGENT_GET_VARIABLE_ANSWER		43
+#define SSH_AGENT_NO_VARIABLE			44
+#define SSH_AGENTC_LIST_VARIABLE_NAMES		45
+#define SSH_AGENT_VARIABLE_NAMES_ANSWER		46
+#define SSH_AGENTC_LIST_VARIABLES		47
+#define SSH_AGENT_VARIABLES_ANSWER		48
+#define SSH_AGENTC_REMOVE_VARIABLE		49
+#define SSH_AGENTC_REMOVE_ALL_VARIABLES		50
+
 #define	SSH_AGENT_CONSTRAIN_LIFETIME		1
 #define	SSH_AGENT_CONSTRAIN_CONFIRM		2
 
@@ -90,5 +103,16 @@ ssh_decrypt_challenge(AuthenticationConnection *, Key *, BIGNUM *, u_char[16],
 int
 ssh_agent_sign(AuthenticationConnection *, Key *, u_char **, u_int *, u_char *,
     u_int);
+
+int
+ssh_set_variable(AuthenticationConnection *, const char *, u_int, const char *, u_int);
+int
+ssh_get_variable(AuthenticationConnection *, const char *, u_int, char **, u_int *);
+int
+ssh_get_first_variable(AuthenticationConnection *, const char *, u_int, char, char **, u_int *, char **, u_int *);
+int
+ssh_get_next_variable(AuthenticationConnection *, char, char **, u_int *, char **, u_int *);
+int
+ssh_delete_variable(AuthenticationConnection *, const char *, u_int, char);
 
 #endif				/* AUTHFD_H */

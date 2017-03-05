@@ -62,7 +62,7 @@ LDFLAGS=-L. -Lopenbsd-compat/ @LDFLAGS@
 EXEEXT=@EXEEXT@
 MANFMT=@MANFMT@
 
-TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) ssh-add$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT)
+TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) ssh-add$(EXEEXT) ssh-store$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT)
 
 LIBOPENSSH_OBJS=\
 	ssherr.o \
@@ -167,6 +167,9 @@ scp$(EXEEXT): $(LIBCOMPAT) libssh.a scp.o progressmeter.o
 
 ssh-add$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-add.o
 	$(LD) -o $@ ssh-add.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
+
+ssh-store$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-store.o
+	$(LD) -o $@ ssh-store.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
 
 ssh-agent$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-agent.o ssh-pkcs11-client.o
 	$(LD) -o $@ ssh-agent.o ssh-pkcs11-client.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
@@ -289,6 +292,7 @@ install-files:
 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh$(EXEEXT) $(DESTDIR)$(bindir)/ssh$(EXEEXT)
 	$(INSTALL) -m 0755 $(STRIP_OPT) scp$(EXEEXT) $(DESTDIR)$(bindir)/scp$(EXEEXT)
 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-add$(EXEEXT) $(DESTDIR)$(bindir)/ssh-add$(EXEEXT)
+	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-store$(EXEEXT) $(DESTDIR)$(bindir)/ssh-store$(EXEEXT)
 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-agent$(EXEEXT) $(DESTDIR)$(bindir)/ssh-agent$(EXEEXT)
 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-keygen$(EXEEXT) $(DESTDIR)$(bindir)/ssh-keygen$(EXEEXT)
 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-keyscan$(EXEEXT) $(DESTDIR)$(bindir)/ssh-keyscan$(EXEEXT)
@@ -395,6 +399,7 @@ uninstall:
 	-rm -f $(DESTDIR)$(bindir)/ssh$(EXEEXT)
 	-rm -f $(DESTDIR)$(bindir)/scp$(EXEEXT)
 	-rm -f $(DESTDIR)$(bindir)/ssh-add$(EXEEXT)
+	-rm -f $(DESTDIR)$(bindir)/ssh-store$(EXEEXT)
 	-rm -f $(DESTDIR)$(bindir)/ssh-agent$(EXEEXT)
 	-rm -f $(DESTDIR)$(bindir)/ssh-keygen$(EXEEXT)
 	-rm -f $(DESTDIR)$(bindir)/ssh-keyscan$(EXEEXT)
