@@ -137,6 +137,21 @@ struct idtable {
 /* private key table */
 struct idtable *idtab;
 
+typedef struct variable {
+	TAILQ_ENTRY(variable) next;
+	char *var;
+	char *val;
+	u_int lvar;
+	u_int lval;
+} Variable;
+
+typedef struct {
+	int nentries;
+	TAILQ_HEAD(varqueue, variable) varlist;
+} Vartab;
+
+Vartab vartable;
+
 int max_fd = 0;
 
 /* pid of shell == parent of agent */
@@ -192,6 +207,13 @@ idtab_init(void)
 }
 
 static void
+vartab_init(void)
+{
+  TAILQ_INIT(&vartable.varlist);
+  vartable.nentries = 0;
+}
+
+static void
 free_identity(Identity *id)
 {
 	sshkey_free(id->key);
@@ -199,6 +221,14 @@ free_identity(Identity *id)
 	free(id->comment);
 	free(id->sk_provider);
 	free(id);
+}
+
+static void
+free_variable(Variable *v)
+{
+  free(v->var);
+  free(v->val);
+	free(v);
 }
 
 /* return matching private key for given public key */
@@ -958,6 +988,284 @@ send:
 }
 #endif /* ENABLE_PKCS11 */
 
+static int
+process_ext_session_bind(SocketEntry *e)
+{
+	int r, sid_match, key_match;
+	struct sshkey *key = NULL;
+	struct sshbuf *sid = NULL, *sig = NULL;
+	char *fp = NULL;
+	size_t i;
+	u_char fwd = 0;
+
+	debug2_f("entering");
+	if ((r = sshkey_froms(e->request, &key)) != 0 ||
+	    (r = sshbuf_froms(e->request, &sid)) != 0 ||
+	    (r = sshbuf_froms(e->request, &sig)) != 0 ||
+	    (r = sshbuf_get_u8(e->request, &fwd)) != 0) {
+		error_fr(r, "parse");
+		goto out;
+	}
+	if ((fp = sshkey_fingerprint(key, SSH_FP_HASH_DEFAULT,
+	    SSH_FP_DEFAULT)) == NULL)
+		fatal_f("fingerprint failed");
+	/* check signature with hostkey on session ID */
+	if ((r = sshkey_verify(key, sshbuf_ptr(sig), sshbuf_len(sig),
+	    sshbuf_ptr(sid), sshbuf_len(sid), NULL, 0, NULL)) != 0) {
+		error_fr(r, "sshkey_verify for %s %s", sshkey_type(key), fp);
+		goto out;
+	}
+	/* check whether sid/key already recorded */
+	for (i = 0; i < e->nsession_ids; i++) {
+		if (!e->session_ids[i].forwarded) {
+			error_f("attempt to bind session ID to socket "
+			    "previously bound for authentication attempt");
+			r = -1;
+			goto out;
+		}
+		sid_match = buf_equal(sid, e->session_ids[i].sid) == 0;
+		key_match = sshkey_equal(key, e->session_ids[i].key);
+		if (sid_match && key_match) {
+			debug_f("session ID already recorded for %s %s",
+			    sshkey_type(key), fp);
+			r = 0;
+			goto out;
+		} else if (sid_match) {
+			error_f("session ID recorded against different key "
+			    "for %s %s", sshkey_type(key), fp);
+			r = -1;
+			goto out;
+		}
+		/*
+		 * new sid with previously-seen key can happen, e.g. multiple
+		 * connections to the same host.
+		 */
+	}
+	/* record new key/sid */
+	if (e->nsession_ids >= AGENT_MAX_SESSION_IDS) {
+		error_f("too many session IDs recorded");
+		goto out;
+	}
+	e->session_ids = xrecallocarray(e->session_ids, e->nsession_ids,
+	    e->nsession_ids + 1, sizeof(*e->session_ids));
+	i = e->nsession_ids++;
+	debug_f("recorded %s %s (slot %zu of %d)", sshkey_type(key), fp, i,
+	    AGENT_MAX_SESSION_IDS);
+	e->session_ids[i].key = key;
+	e->session_ids[i].forwarded = fwd != 0;
+	key = NULL; /* transferred */
+	/* can't transfer sid; it's refcounted and scoped to request's life */
+	if ((e->session_ids[i].sid = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new");
+	if ((r = sshbuf_putb(e->session_ids[i].sid, sid)) != 0)
+		fatal_fr(r, "sshbuf_putb session ID");
+	/* success */
+	r = 0;
+ out:
+	free(fp);
+	sshkey_free(key);
+	sshbuf_free(sid);
+	sshbuf_free(sig);
+	return r == 0 ? 1 : 0;
+}
+/* return variable entry for given name */
+static Variable *
+lookup_variable(const char *var, u_int lvar)
+{
+	Variable *v;
+
+	TAILQ_FOREACH(v, &vartable.varlist, next) {
+		if (lvar == v->lvar && 0 == memcmp(var, v->var, lvar))
+      return (v);
+	}
+	return (NULL);
+}
+
+
+static void
+process_set_variable(SocketEntry *e)
+{
+	u_int lvar, lval;
+	char *var, *val;
+  Variable *v;
+  int replace = 0;
+
+  var= buffer_get_string(&e->request, &lvar);
+  val= buffer_get_string(&e->request, &lval);
+
+  if ((v = lookup_variable(var, lvar))) {
+    debug("set '%.*s' = '%.*s' (replacing old value '%.*s')", lvar, var, lval, val, v->lval, v->val);
+    free(var);
+    free(v->val);
+    replace = 1;
+  } else {
+    debug("set '%.*s' = '%.*s'", lvar, var, lval, val);
+    v = xmalloc(sizeof(Variable));
+    v->var = var;
+    v->lvar = lvar;
+    TAILQ_INSERT_TAIL(&vartable.varlist, v, next);
+    vartable.nentries++;
+  }
+  v->val = val;
+  v->lval = lval;
+	buffer_put_int(&e->output, 1);
+	buffer_put_char(&e->output, replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS);
+}
+
+
+static void
+process_get_variable(SocketEntry *e)
+{
+	u_int lvar;
+	char *var;
+  Variable *v;
+	Buffer msg;
+
+  var= buffer_get_string(&e->request, &lvar);
+
+	buffer_init(&msg);
+  if ((v = lookup_variable(var, lvar))) {
+    debug("get '%.*s' -> '%.*s'", lvar, var, v->lval, v->val);
+    buffer_put_char(&msg, SSH_AGENT_GET_VARIABLE_ANSWER);
+    buffer_put_string(&msg, v->val, v->lval);
+  } else {
+    debug("variable '%.*s' not found", lvar, var);
+    buffer_put_char(&msg, SSH_AGENT_NO_VARIABLE);
+  }
+  free(var);
+	buffer_put_int(&e->output, buffer_len(&msg));
+	buffer_append(&e->output, buffer_ptr(&msg), buffer_len(&msg));
+	buffer_free(&msg);
+}
+
+/* send list of variables */
+static void
+process_list_variables(SocketEntry *e, char full)
+{
+	Buffer msg, msg2;
+  char *prefix;
+  u_int lprefix, nret = 0;
+  Variable *v;
+
+  prefix= buffer_get_string(&e->request, &lprefix);
+	buffer_init(&msg);
+	TAILQ_FOREACH(v, &vartable.varlist, next) {
+    if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
+      buffer_put_string(&msg, v->var, v->lvar);
+      if (full) buffer_put_string(&msg, v->val, v->lval);
+      nret++;
+    }
+	}
+  free(prefix);
+	buffer_init(&msg2);
+	buffer_put_char(&msg2, full ?
+	    SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
+	buffer_put_int(&msg2, nret);
+	buffer_put_int(&e->output, buffer_len(&msg)+buffer_len(&msg2));
+	buffer_append(&e->output, buffer_ptr(&msg2), buffer_len(&msg2));
+	buffer_append(&e->output, buffer_ptr(&msg), buffer_len(&msg));
+	buffer_free(&msg);
+}
+
+static void
+no_variables(SocketEntry *e, u_int type)
+{
+	Buffer msg;
+
+	buffer_init(&msg);
+	buffer_put_char(&msg,
+	    (type == SSH_AGENTC_LIST_VARIABLES) ?
+	    SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
+	buffer_put_int(&msg, 0);
+	buffer_put_int(&e->output, buffer_len(&msg));
+	buffer_append(&e->output, buffer_ptr(&msg), buffer_len(&msg));
+	buffer_free(&msg);
+}
+
+/* shared */
+static void
+process_remove_variable(SocketEntry *e)
+{
+	int success = 0;
+	u_int lvar;
+	char *var;
+  Variable *v;
+
+  var= buffer_get_string(&e->request, &lvar);
+
+  if ((v = lookup_variable(var, lvar))) {
+    /*
+     * We have this key.  Free the old key.  Since we
+     * don't want to leave empty slots in the middle of
+     * the array, we actually free the key there and move
+     * all the entries between the empty slot and the end
+     * of the array.
+     */
+    if (vartable.nentries < 1)
+      fatal("process_remove_identity: "
+				    "internal error: vartable.nentries %d",
+				    vartable.nentries);
+    TAILQ_REMOVE(&vartable.varlist, v, next);
+    free_variable (v);
+    vartable.nentries--;
+    success = 1;
+	}
+  free (var);
+	buffer_put_int(&e->output, 1);
+	buffer_put_char(&e->output,
+	    success ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
+}
+
+static void
+process_remove_all_variables(SocketEntry *e)
+{
+  char *prefix;
+  u_int lprefix, ndel = 0;
+  Variable *v, *last = NULL;
+
+  prefix= buffer_get_string(&e->request, &lprefix);
+	TAILQ_FOREACH(v, &vartable.varlist, next) {
+    if (last) {   /* don't remove variable until we've moved past it */
+      TAILQ_REMOVE(&vartable.varlist, last, next);
+      free_variable (last);
+      last = NULL;
+    }
+    if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
+      vartable.nentries--;
+      ndel++;
+      last = v;
+    }
+	}
+  if (last) {
+    TAILQ_REMOVE(&vartable.varlist, last, next);
+    free_variable (last);
+  }
+  free(prefix);
+
+	/* Send success. */
+	buffer_put_int(&e->output, 1);
+	buffer_put_char(&e->output, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
+}
+
+static void
+process_extension(SocketEntry *e)
+{
+	int r, success = 0;
+	char *name;
+
+	debug2_f("entering");
+	if ((r = sshbuf_get_cstring(e->request, &name, NULL)) != 0) {
+		error_fr(r, "parse");
+		goto send;
+	}
+	if (strcmp(name, "session-bind@openssh.com") == 0)
+		success = process_ext_session_bind(e);
+	else
+		debug_f("unsupported extension \"%s\"", name);
+	free(name);
+send:
+	send_status(e, success);
+}
 /*
  * dispatch incoming message.
  * returns 1 on success, 0 for incomplete messages or -1 on error.
@@ -1009,6 +1317,10 @@ process_message(u_int socknum)
 			/* send empty lists */
 			no_identities(e);
 			break;
+    case SSH_AGENTC_LIST_VARIABLE_NAMES:
+    case SSH_AGENTC_LIST_VARIABLES:
+      no_variables(e, type);
+      break;
 		default:
 			/* send a fail message for all other request types */
 			send_status(e, 0);
@@ -1050,6 +1362,26 @@ process_message(u_int socknum)
 		process_remove_smartcard_key(e);
 		break;
 #endif /* ENABLE_PKCS11 */
+	case SSH_AGENTC_EXTENSION:
+		process_extension(e);
+	case SSH_AGENTC_SET_VARIABLE:
+		process_set_variable(e);
+		break;
+	case SSH_AGENTC_GET_VARIABLE:
+		process_get_variable(e);
+		break;
+	case SSH_AGENTC_LIST_VARIABLE_NAMES:
+		process_list_variables(e, 0);
+		break;
+	case SSH_AGENTC_LIST_VARIABLES:
+		process_list_variables(e, 1);
+		break;
+	case SSH_AGENTC_REMOVE_VARIABLE:
+		process_remove_variable(e);
+		break;
+	case SSH_AGENTC_REMOVE_ALL_VARIABLES:
+		process_remove_all_variables(e);
+		break;
 	default:
 		/* Unknown message.  Respond with failure. */
 		error("Unknown message %d", type);
@@ -1614,7 +1946,9 @@ skip:
 	new_socket(AUTH_SOCKET, sock);
 	if (ac > 0)
 		parent_alive_interval = 10;
+
 	idtab_init();
+	vartab_init();
 	ssh_signal(SIGPIPE, SIG_IGN);
 	ssh_signal(SIGINT, (d_flag | D_flag) ? cleanup_handler : SIG_IGN);
 	ssh_signal(SIGHUP, cleanup_handler);
