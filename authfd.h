@@ -108,14 +108,14 @@ int	ssh_agent_sign(int sock, const struct sshkey *key,
 #define	SSH_AGENT_RSA_SHA2_512			0x04
 
 int
-ssh_set_variable(AuthenticationConnection *, const char *, u_int, const char *, u_int);
+ssh_set_variable(int, const char *, u_int, const char *, u_int);
 int
-ssh_get_variable(AuthenticationConnection *, const char *, u_int, char **, u_int *);
+ssh_get_variable(int, const char *, u_int, char **, u_int *);
 int
-ssh_get_first_variable(AuthenticationConnection *, const char *, u_int, char, char **, u_int *, char **, u_int *);
+ssh_get_first_variable(int, const char *, u_int, char, char **, u_int *, char **, u_int *, Buffer *, int *);
 int
-ssh_get_next_variable(AuthenticationConnection *, char, char **, u_int *, char **, u_int *);
+ssh_get_next_variable(int, char, char **, u_int *, char **, u_int *, Buffer *, int *);
 int
-ssh_delete_variable(AuthenticationConnection *, const char *, u_int, char);
+ssh_delete_variable(int, const char *, u_int, char);
 
 #endif				/* AUTHFD_H */

@@ -42,7 +42,6 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/param.h>
 
 #include <openssl/evp.h>
 
@@ -58,19 +57,21 @@
 #include "ssh.h"
 #include "rsa.h"
 #include "log.h"
-#include "key.h"
-#include "buffer.h"
+#include "sshkey.h"
+#include "sshbuf.h"
 #include "authfd.h"
 #include "authfile.h"
 #include "pathnames.h"
 #include "misc.h"
+#include "ssherr.h"
+#include "digest.h"
 
 /* argv0 */
 extern char *__progname;
 #define CHUNK 1024
 
 int
-set_from_file(AuthenticationConnection *auth, const char *var, u_int lvar, const char *file)
+set_from_file(int agent_fd, const char *var, u_int lvar, const char *file)
 {
   FILE *f;
   char *val = NULL;
@@ -89,23 +90,23 @@ set_from_file(AuthenticationConnection *auth, const char *var, u_int lvar, const
   }
   lval = 0;
   do {
-    val= xrealloc (val, lval+CHUNK, 1);
+    val= xreallocarray (val, lval+CHUNK, 1);
     n = fread (val+lval, 1, CHUNK, f);
     lval += n;
   } while (n == CHUNK);
-  ret = ssh_set_variable (auth, var, lvar, val, lval);
+  ret = ssh_set_variable (agent_fd, var, lvar, val, lval);
   free (val);
   return ret;
 }
 
 static int
-print_variable(AuthenticationConnection *auth, const char *var, u_int lvar)
+print_variable(int agent_fd, const char *var, u_int lvar)
 {
   int ret = 0;
   char *val;
   u_int lval;
 
-  ret = ssh_get_variable(auth, var, lvar, &val, &lval);
+  ret = ssh_get_variable(agent_fd, var, lvar, &val, &lval);
   if (ret && val) {
     fwrite (val, 1, lval, stdout);
     free(val);
@@ -114,15 +115,17 @@ print_variable(AuthenticationConnection *auth, const char *var, u_int lvar)
 }
 
 static int
-list_variables(AuthenticationConnection *ac, const char* prefix, u_int lprefix, char full)
+list_variables(int agent_fd, const char* prefix, u_int lprefix, char full)
 {
   char *var, *val;
   u_int lvar, lval;
   int ok, nvars = 0;
+  Buffer identities;
+  int howmany = 0;
 
-  for (ok = ssh_get_first_variable(ac, prefix, lprefix, full, &var, &lvar, &val, &lval);
+  for (ok = ssh_get_first_variable(agent_fd, prefix, lprefix, full, &var, &lvar, &val, &lval, &identities, &howmany);
        ok;
-       ok = ssh_get_next_variable(ac, full, &var, &lvar, &val, &lval)) {
+       ok = ssh_get_next_variable(agent_fd, full, &var, &lvar, &val, &lval, &identities, &howmany)) {
     fwrite (var, 1, lvar, stdout);
     if (full && val) {
       putchar (' ');
@@ -156,21 +159,27 @@ int
 main(int argc, char **argv)
 {
   extern int optind;
-  AuthenticationConnection *ac = NULL;
-  int ch, set = 0, get = 0, list = 0, delete = 0, ret = 0;
+	int agent_fd;
+  int r, ch, set = 0, get = 0, list = 0, delete = 0, ret = 0;
 
+	ssh_malloc_init();	/* must be called before any mallocs */
   /* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
   sanitise_stdfd();
 
   __progname = ssh_get_progname(argv[0]);
 
-  /* At first, get a connection to the authentication agent. */
-  ac = ssh_get_authentication_connection();
-  if (ac == NULL) {
-    fprintf(stderr,
-        "Could not open a connection to your authentication agent.\n");
-    exit(2);
-  }
+	/* First, get a connection to the authentication agent. */
+	switch (r = ssh_get_authentication_socket(&agent_fd)) {
+	case 0:
+		break;
+	case SSH_ERR_AGENT_NOT_PRESENT:
+		fprintf(stderr, "Could not open a connection to your "
+		    "authentication agent.\n");
+		exit(2);
+	default:
+		fprintf(stderr, "Error connecting to agent: %s\n", ssh_err(r));
+		exit(2);
+	}
   while ((ch = getopt(argc, argv, "hsfglLdD")) != -1) {
     switch (ch) {
     case 's':
@@ -221,26 +230,26 @@ main(int argc, char **argv)
   }
 
   if        (set == 2) {
-    ret = set_from_file       (ac, argv[0], strlen(argv[0]), (argc >= 2 ? argv[1] : NULL));
+    ret = set_from_file       (agent_fd, argv[0], strlen(argv[0]), (argc >= 2 ? argv[1] : NULL));
   } else if (set) {
-    ret = ssh_set_variable    (ac, argv[0], strlen(argv[0]), argv[1], strlen(argv[1]));
+    ret = ssh_set_variable    (agent_fd, argv[0], strlen(argv[0]), argv[1], strlen(argv[1]));
   } else if (get) {
-    ret = print_variable      (ac, argv[0], strlen(argv[0]));
+    ret = print_variable      (agent_fd, argv[0], strlen(argv[0]));
   } else if (list) {
     if (argc >= 1) {
-      ret = list_variables      (ac, argv[0], strlen(argv[0]), (list==2));
+      ret = list_variables      (agent_fd, argv[0], strlen(argv[0]), (list==2));
     } else {
-      ret = list_variables      (ac, "",      0,               (list==2));
+      ret = list_variables      (agent_fd, "",      0,               (list==2));
     }
   } else if (delete) {
     if (argc >= 1) {
-      ret = ssh_delete_variable (ac, argv[0], strlen(argv[0]), (delete==2));
+      ret = ssh_delete_variable (agent_fd, argv[0], strlen(argv[0]), (delete==2));
     } else {
-      ret = ssh_delete_variable (ac, "",      0,               (delete==2));
+      ret = ssh_delete_variable (agent_fd, "",      0,               (delete==2));
     }
   }
   
 done:
-  ssh_close_authentication_connection(ac);
+	ssh_close_authentication_socket(agent_fd);
   return (ret > 0 ? ret-1 : 10);
 }
