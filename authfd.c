@@ -83,24 +83,6 @@ decode_reply(u_char type)
 		return SSH_ERR_INVALID_FORMAT;
 }
 
-int
-decode_reply(int type)
-{
-	switch (type) {
-	case SSH_AGENT_FAILURE:
-	case SSH_COM_AGENT2_FAILURE:
-	case SSH2_AGENT_FAILURE:
-		logit("SSH_AGENT_FAILURE");
-		return 0;
-	case SSH_AGENT_SUCCESS:
-		return 1;
-	default:
-		fatal("Bad response from authentication agent: %d", type);
-	}
-	/* NOTREACHED */
-	return 0;
-}
-
 /* Returns the number of the authentication fd, or -1 if there is none. */
 int
 ssh_get_authentication_socket(int *fdp)
@@ -736,16 +718,6 @@ ssh_remove_all_identities(int sock, int version)
  out:
 	sshbuf_free(msg);
 	return r;
-	buffer_init(&msg);
-	buffer_put_char(&msg, code);
-
-	if (ssh_request_reply(auth, &msg, &msg) == 0) {
-		buffer_free(&msg);
-		return 0;
-	}
-	type = buffer_get_char(&msg);
-	buffer_free(&msg);
-	return decode_reply(type);
 }
 
 int
