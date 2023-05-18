@@ -93,7 +93,6 @@ set_from_file(AuthenticationConnection *auth, const char *var, u_int lvar, const
     n = fread (val+lval, 1, CHUNK, f);
     lval += n;
   } while (n == CHUNK);
-  if (lval > 0 && val[lval-1] == '\n') lval--;
   ret = ssh_set_variable (auth, var, lvar, val, lval);
   free (val);
   return ret;
@@ -102,25 +101,24 @@ set_from_file(AuthenticationConnection *auth, const char *var, u_int lvar, const
 static int
 print_variable(AuthenticationConnection *auth, const char *var, u_int lvar)
 {
-	int ret = 0;
+  int ret = 0;
   char *val;
   u_int lval;
 
   ret = ssh_get_variable(auth, var, lvar, &val, &lval);
   if (ret && val) {
     fwrite (val, 1, lval, stdout);
-    putchar ('\n');
     free(val);
   }
-	return ret;
+  return ret;
 }
 
 static int
 list_variables(AuthenticationConnection *ac, const char* prefix, u_int lprefix, char full)
 {
-	char *var, *val;
+  char *var, *val;
   u_int lvar, lval;
-	int ok, nvars = 0;
+  int ok, nvars = 0;
 
   for (ok = ssh_get_first_variable(ac, prefix, lprefix, full, &var, &lvar, &val, &lval);
        ok;
@@ -129,80 +127,81 @@ list_variables(AuthenticationConnection *ac, const char* prefix, u_int lprefix, 
     if (full && val) {
       putchar (' ');
       fwrite (val, 1, lval, stdout);
+      if (!(lval > 0 && val[lval-1] == '\n')) putchar ('\n');
+    } else {
+      putchar ('\n');
     }
-    putchar ('\n');
     free(var);
     if (val) free(val);
     nvars++;
-	}
+  }
   return (nvars==0 ? 2 : 1);
 }
 
 static void
 usage(void)
 {
-	fprintf(stderr, "Usage: %s [options] variable [value]\n", __progname);
-	fprintf(stderr, "Options:\n");
-	fprintf(stderr, "  -s          Set variable (default if value specified).\n");
-	fprintf(stderr, "  -f          Set value from a file (specified as second argument, or else stdin).\n");
-	fprintf(stderr, "  -g          Get variable value (default if value not specified).\n");
-	fprintf(stderr, "  -l          List stored variables.\n");
-	fprintf(stderr, "  -L          List stored variables and their values (may include binary values)\n");
-	fprintf(stderr, "  -d          Delete stored value.\n");
-	fprintf(stderr, "  -D          Delete all stored values.\n");
+  fprintf(stderr, "Usage: %s [options] variable [value]\n", __progname);
+  fprintf(stderr, "Options:\n");
+  fprintf(stderr, "  -s          Set variable (default if value specified).\n");
+  fprintf(stderr, "  -f          Set value from a file (specified as second argument, or else stdin).\n");
+  fprintf(stderr, "  -g          Get variable value (default if value not specified).\n");
+  fprintf(stderr, "  -l          List stored variables.\n");
+  fprintf(stderr, "  -L          List stored variables and their values (may include binary values)\n");
+  fprintf(stderr, "  -d          Delete stored value.\n");
+  fprintf(stderr, "  -D          Delete all stored values.\n");
 }
 
 int
 main(int argc, char **argv)
 {
-	extern char *optarg;
-	extern int optind;
-	AuthenticationConnection *ac = NULL;
-	int ch, set = 0, get = 0, list = 0, delete = 0, ret = 0;
+  extern int optind;
+  AuthenticationConnection *ac = NULL;
+  int ch, set = 0, get = 0, list = 0, delete = 0, ret = 0;
 
-	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
-	sanitise_stdfd();
+  /* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
+  sanitise_stdfd();
 
-	__progname = ssh_get_progname(argv[0]);
+  __progname = ssh_get_progname(argv[0]);
 
-	/* At first, get a connection to the authentication agent. */
-	ac = ssh_get_authentication_connection();
-	if (ac == NULL) {
-		fprintf(stderr,
-		    "Could not open a connection to your authentication agent.\n");
-		exit(2);
-	}
-	while ((ch = getopt(argc, argv, "hsfglLdD")) != -1) {
-		switch (ch) {
-		case 's':
+  /* At first, get a connection to the authentication agent. */
+  ac = ssh_get_authentication_connection();
+  if (ac == NULL) {
+    fprintf(stderr,
+        "Could not open a connection to your authentication agent.\n");
+    exit(2);
+  }
+  while ((ch = getopt(argc, argv, "hsfglLdD")) != -1) {
+    switch (ch) {
+    case 's':
       set = 1;
-			break;
-		case 'f':
+      break;
+    case 'f':
       set = 2;
-			break;
-		case 'g':
+      break;
+    case 'g':
       get = 1;
-			break;
-		case 'l':
+      break;
+    case 'l':
       list = 1;
       break;
-		case 'L':
+    case 'L':
       list = 2;
       break;
-		case 'd':
-			delete = 1;
-			break;
-		case 'D':
-			delete = 2;
-			break;
-		default:
-			usage();
-			ret = 2;
-			goto done;
-		}
-	}
-	argc -= optind;
-	argv += optind;
+    case 'd':
+      delete = 1;
+      break;
+    case 'D':
+      delete = 2;
+      break;
+    default:
+      usage();
+      ret = 2;
+      goto done;
+    }
+  }
+  argc -= optind;
+  argv += optind;
 
   if ((set == 1 && argc != 2) ||
       (set == 2 && (argc < 1 || argc > 2)) ||
@@ -242,6 +241,6 @@ main(int argc, char **argv)
   }
   
 done:
-	ssh_close_authentication_connection(ac);
-	return (ret > 0 ? ret-1 : 10);
+  ssh_close_authentication_connection(ac);
+  return (ret > 0 ? ret-1 : 10);
 }
