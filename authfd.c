@@ -52,6 +52,7 @@
 #include "xmalloc.h"
 #include "ssh.h"
 #include "sshbuf.h"
+#include "buffer.h"
 #include "sshkey.h"
 #include "authfd.h"
 #include "cipher.h"
@@ -754,7 +755,7 @@ ssh_agent_bind_hostkey(int sock, const struct sshkey *key,
 }
 
 int
-ssh_set_variable(AuthenticationConnection *auth, const char *var, u_int lvar, const char *val, u_int lval)
+ssh_set_variable(int sock, const char *var, u_int lvar, const char *val, u_int lval)
 {
 	Buffer msg;
 	int type;
@@ -763,7 +764,7 @@ ssh_set_variable(AuthenticationConnection *auth, const char *var, u_int lvar, co
 	buffer_put_char(&msg, SSH_AGENTC_SET_VARIABLE);
   buffer_put_string(&msg, var, lvar);
   buffer_put_string(&msg, val, lval);
-	if (ssh_request_reply(auth, &msg, &msg) == 0) {
+	if (ssh_request_reply(sock, &msg, &msg) == 0) {
 		buffer_free(&msg);
 		return 0;
 	}
@@ -775,7 +776,7 @@ ssh_set_variable(AuthenticationConnection *auth, const char *var, u_int lvar, co
 
 
 int
-ssh_get_variable(AuthenticationConnection *auth, const char *var, u_int lvar, char **valp, u_int *lvalp)
+ssh_get_variable(int sock, const char *var, u_int lvar, char **valp, u_int *lvalp)
 {
 	Buffer msg;
 	int ret = 0;
@@ -786,7 +787,7 @@ ssh_get_variable(AuthenticationConnection *auth, const char *var, u_int lvar, ch
 	buffer_init(&msg);
 	buffer_put_char(&msg, SSH_AGENTC_GET_VARIABLE);
   buffer_put_string(&msg, var, lvar);
-	if (ssh_request_reply(auth, &msg, &msg) == 0) {
+	if (ssh_request_reply(sock, &msg, &msg) == 0) {
 		buffer_free(&msg);
 		return 0;
 	}
@@ -811,10 +812,11 @@ ssh_get_variable(AuthenticationConnection *auth, const char *var, u_int lvar, ch
  */
 
 static int
-ssh_get_num_variables(AuthenticationConnection *auth, const char *prefix, u_int lprefix, char full)
+ssh_get_num_variables(int sock, const char *prefix, u_int lprefix, char full, Buffer *identities)
 {
 	Buffer request;
 	int type;
+  int howmany = 0;
 
   if (!prefix) {
     prefix = "";
@@ -824,15 +826,15 @@ ssh_get_num_variables(AuthenticationConnection *auth, const char *prefix, u_int 
 	buffer_put_char(&request, full ? SSH_AGENTC_LIST_VARIABLES : SSH_AGENTC_LIST_VARIABLE_NAMES);
   buffer_put_string(&request, prefix, lprefix);
 
-	buffer_clear(&auth->identities);
-	if (ssh_request_reply(auth, &request, &auth->identities) == 0) {
+	buffer_init(identities);
+	if (ssh_request_reply(sock, &request, identities) == 0) {
 		buffer_free(&request);
 		return 0;
 	}
 	buffer_free(&request);
 
 	/* Get message type, and verify that we got a proper answer. */
-	type = buffer_get_char(&auth->identities);
+	type = buffer_get_char(identities);
 	if (agent_failed(type)) {
 		return 0;
 	} else if (type != (full ? SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER)) {
@@ -840,47 +842,49 @@ ssh_get_num_variables(AuthenticationConnection *auth, const char *prefix, u_int 
 	}
 
 	/* Get the number of entries in the response and check it for sanity. */
-	auth->howmany = buffer_get_int(&auth->identities);
-	if ((u_int)auth->howmany > 1024)
+	howmany = buffer_get_int(identities);
+	if ((u_int)howmany > 1024)
 		fatal("Too many variables in agent's reply: %d",
-		    auth->howmany);
+		    howmany);
 
-	return auth->howmany;
+	return howmany;
 }
 
 int
-ssh_get_first_variable(AuthenticationConnection *auth, const char *prefix, u_int lprefix, char full,
-                       char **varp, u_int *lvarp, char **valp, u_int *lvalp)
+ssh_get_first_variable(int sock, const char *prefix, u_int lprefix, char full,
+                       char **varp, u_int *lvarp, char **valp, u_int *lvalp,
+                       Buffer *identities, int *howmany)
 {
 	/* get number of identities and return the first entry (if any). */
-	if (ssh_get_num_variables(auth, prefix, lprefix, full) > 0)
-		return ssh_get_next_variable(auth, full, varp, lvarp, valp, lvalp);
+	if ((*howmany = ssh_get_num_variables(sock, prefix, lprefix, full, identities)) > 0)
+		return ssh_get_next_variable(sock, full, varp, lvarp, valp, lvalp, identities, howmany);
 	return 0;
 }
 
 int
-ssh_get_next_variable(AuthenticationConnection *auth, char full,
-                      char **varp, u_int *lvarp, char **valp, u_int *lvalp)
+ssh_get_next_variable(int sock, char full,
+                      char **varp, u_int *lvarp, char **valp, u_int *lvalp,
+                      Buffer *identities, int *howmany)
 {
   *varp = *valp = NULL;
   *lvarp = *lvalp = 0;
 	/* Return failure if no more entries. */
-	if (auth->howmany <= 0)
+	if (*howmany <= 0)
 		return 0;
 
 	/*
 	 * Get the next entry from the packet.  These will abort with a fatal
 	 * error if the packet is too short or contains corrupt data.
 	 */
-  *varp = buffer_get_string(&auth->identities, lvarp);
-  if (full) *valp = buffer_get_string(&auth->identities, lvalp);
+  *varp = buffer_get_string(identities, lvarp);
+  if (full) *valp = buffer_get_string(identities, lvalp);
 	/* Decrement the number of remaining entries. */
-	auth->howmany--;
+	(*howmany)--;
 	return 1;
 }
 
 int
-ssh_delete_variable(AuthenticationConnection *auth, const char *var, u_int lvar, char all)
+ssh_delete_variable(int sock, const char *var, u_int lvar, char all)
 {
 	Buffer msg;
 	int type;
@@ -892,7 +896,7 @@ ssh_delete_variable(AuthenticationConnection *auth, const char *var, u_int lvar,
 	buffer_init(&msg);
 	buffer_put_char(&msg, all ? SSH_AGENTC_REMOVE_ALL_VARIABLES : SSH_AGENTC_REMOVE_VARIABLE);
   buffer_put_string(&msg, var, lvar);
-	if (ssh_request_reply(auth, &msg, &msg) == 0) {
+	if (ssh_request_reply(sock, &msg, &msg) == 0) {
 		buffer_free(&msg);
 		return 0;
 	}
