@@ -905,10 +905,14 @@ process_set_variable(SocketEntry *e)
 	u_int lvar, lval;
 	char *var, *val;
   Variable *v;
-  int replace = 0;
+  int r, replace = 0;
+	struct sshbuf *msg;
 
-  var= buffer_get_string(&e->request, &lvar);
-  val= buffer_get_string(&e->request, &lval);
+	if ((msg = sshbuf_new()) == NULL)
+		fatal("%s: sshbuf_new failed", __func__);
+	if ((r = sshbuf_get_string(e->request, &var, &lvar)) != 0 ||
+	    (r = sshbuf_get_string(e->request, &val, &lval)) != 0)
+		fatal("%s: buffer error: %s", __func__, ssh_err(r));
 
   if ((v = lookup_variable(var, lvar))) {
     debug("set '%.*s' = '%.*s' (replacing old value '%.*s')", lvar, var, lval, val, v->lval, v->val);
@@ -925,8 +929,9 @@ process_set_variable(SocketEntry *e)
   }
   v->val = val;
   v->lval = lval;
-	buffer_put_int(&e->output, 1);
-	buffer_put_char(&e->output, replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS);
+	if ((r = sshbuf_put_u32(&e->output, 1)) != 0 ||
+	    (r = sshbuf_put_u8(&e->output, replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS)) != 0)
+		fatal("%s: buffer error: %s", __func__, ssh_err(r));
 }
 
 
@@ -936,67 +941,78 @@ process_get_variable(SocketEntry *e)
 	u_int lvar;
 	char *var;
   Variable *v;
-	Buffer msg;
+  int r;
+	struct sshbuf *msg;
 
-  var= buffer_get_string(&e->request, &lvar);
+	if ((msg = sshbuf_new()) == NULL)
+		fatal("%s: sshbuf_new failed", __func__);
+	if ((r = sshbuf_get_string(e->request, &var, &lvar)) != 0)
+		fatal("%s: buffer error: %s", __func__, ssh_err(r));
 
-	buffer_init(&msg);
   if ((v = lookup_variable(var, lvar))) {
     debug("get '%.*s' -> '%.*s'", lvar, var, v->lval, v->val);
-    buffer_put_char(&msg, SSH_AGENT_GET_VARIABLE_ANSWER);
-    buffer_put_string(&msg, v->val, v->lval);
+    sshbuf_put_u8(&msg, SSH_AGENT_GET_VARIABLE_ANSWER);
+    sshbuf_put_string(msg, v->val, v->lval);
   } else {
     debug("variable '%.*s' not found", lvar, var);
-    buffer_put_char(&msg, SSH_AGENT_NO_VARIABLE);
+    sshbuf_put_u8(&msg, SSH_AGENT_NO_VARIABLE);
   }
   free(var);
-	buffer_put_int(&e->output, buffer_len(&msg));
+	sshbuf_put_u32(&e->output, buffer_len(&msg));
 	buffer_append(&e->output, buffer_ptr(&msg), buffer_len(&msg));
-	buffer_free(&msg);
+	sshbuf_free(msg);
 }
 
 /* send list of variables */
 static void
 process_list_variables(SocketEntry *e, char full)
 {
-	Buffer msg, msg2;
   char *prefix;
   u_int lprefix, nret = 0;
   Variable *v;
+  int r;
+	struct sshbuf *msg, *msg2;
 
-  prefix= buffer_get_string(&e->request, &lprefix);
-	buffer_init(&msg);
+	if ((msg = sshbuf_new()) == NULL)
+		fatal("%s: sshbuf_new failed", __func__);
+	if ((r = sshbuf_get_string(e->request, &prefix, &lprefix)) != 0)
+		fatal("%s: buffer error: %s", __func__, ssh_err(r));
+
 	TAILQ_FOREACH(v, &vartable.varlist, next) {
     if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
-      buffer_put_string(&msg, v->var, v->lvar);
-      if (full) buffer_put_string(&msg, v->val, v->lval);
+      sshbuf_put_string(msg, v->var, v->lvar);
+      if (full) sshbuf_put_string(msg, v->val, v->lval);
       nret++;
     }
 	}
   free(prefix);
-	buffer_init(&msg2);
-	buffer_put_char(&msg2, full ?
+
+	if ((msg2 = sshbuf_new()) == NULL)
+		fatal("%s: sshbuf_new failed", __func__);
+	sshbuf_put_u8(&msg2, full ?
 	    SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
-	buffer_put_int(&msg2, nret);
-	buffer_put_int(&e->output, buffer_len(&msg)+buffer_len(&msg2));
+	sshbuf_put_u32(&msg2, nret);
+	sshbuf_put_u32(&e->output, buffer_len(&msg)+buffer_len(&msg2));
 	buffer_append(&e->output, buffer_ptr(&msg2), buffer_len(&msg2));
 	buffer_append(&e->output, buffer_ptr(&msg), buffer_len(&msg));
-	buffer_free(&msg);
+	sshbuf_free(msg);
 }
 
 static void
 no_variables(SocketEntry *e, u_int type)
 {
-	Buffer msg;
+	struct sshbuf *msg;
+	int r;
 
-	buffer_init(&msg);
-	buffer_put_char(&msg,
+	if ((msg = sshbuf_new()) == NULL)
+		fatal("%s: sshbuf_new failed", __func__);
+	sshbuf_put_u8(&msg,
 	    (type == SSH_AGENTC_LIST_VARIABLES) ?
 	    SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
-	buffer_put_int(&msg, 0);
-	buffer_put_int(&e->output, buffer_len(&msg));
+	sshbuf_put_u32(&msg, 0);
+	sshbuf_put_u32(&e->output, buffer_len(&msg));
 	buffer_append(&e->output, buffer_ptr(&msg), buffer_len(&msg));
-	buffer_free(&msg);
+	sshbuf_free(msg);
 }
 
 /* shared */
@@ -1007,8 +1023,13 @@ process_remove_variable(SocketEntry *e)
 	u_int lvar;
 	char *var;
   Variable *v;
+  int r;
+	struct sshbuf *msg;
 
-  var= buffer_get_string(&e->request, &lvar);
+	if ((msg = sshbuf_new()) == NULL)
+		fatal("%s: sshbuf_new failed", __func__);
+	if ((r = sshbuf_get_string(e->request, &var, &lvar)) != 0)
+		fatal("%s: buffer error: %s", __func__, ssh_err(r));
 
   if ((v = lookup_variable(var, lvar))) {
     /*
@@ -1028,8 +1049,8 @@ process_remove_variable(SocketEntry *e)
     success = 1;
 	}
   free (var);
-	buffer_put_int(&e->output, 1);
-	buffer_put_char(&e->output,
+	sshbuf_put_u32(&e->output, 1);
+	sshbuf_put_u8(&e->output,
 	    success ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
 }
 
@@ -1039,8 +1060,14 @@ process_remove_all_variables(SocketEntry *e)
   char *prefix;
   u_int lprefix, ndel = 0;
   Variable *v, *last = NULL;
+  int r;
+	struct sshbuf *msg;
 
-  prefix= buffer_get_string(&e->request, &lprefix);
+	if ((msg = sshbuf_new()) == NULL)
+		fatal("%s: sshbuf_new failed", __func__);
+	if ((r = sshbuf_get_string(e->request, &prefix, &lprefix)) != 0)
+		fatal("%s: buffer error: %s", __func__, ssh_err(r));
+
 	TAILQ_FOREACH(v, &vartable.varlist, next) {
     if (last) {   /* don't remove variable until we've moved past it */
       TAILQ_REMOVE(&vartable.varlist, last, next);
@@ -1060,8 +1087,8 @@ process_remove_all_variables(SocketEntry *e)
   free(prefix);
 
 	/* Send success. */
-	buffer_put_int(&e->output, 1);
-	buffer_put_char(&e->output, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
+	sshbuf_put_u32(&e->output, 1);
+	sshbuf_put_u8(&e->output, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
 }
 
 /* dispatch incoming messages */
