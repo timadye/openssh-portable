@@ -78,6 +78,7 @@
 #include "ssh.h"
 #include "ssh2.h"
 #include "sshbuf.h"
+#include "buffer.h"
 #include "sshkey.h"
 #include "authfd.h"
 #include "log.h"
@@ -1820,8 +1821,8 @@ process_set_variable(SocketEntry *e)
   Variable *v;
   int replace = 0;
 
-  var= buffer_get_string(&e->request, &lvar);
-  val= buffer_get_string(&e->request, &lval);
+  var= buffer_get_string(e->request, &lvar);
+  val= buffer_get_string(e->request, &lval);
 
   if ((v = lookup_variable(var, lvar))) {
     debug("set '%.*s' = '%.*s' (replacing old value '%.*s')", lvar, var, lval, val, v->lval, v->val);
@@ -1838,8 +1839,8 @@ process_set_variable(SocketEntry *e)
   }
   v->val = val;
   v->lval = lval;
-	buffer_put_int(&e->output, 1);
-	buffer_put_char(&e->output, replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS);
+	buffer_put_int(e->output, 1);
+	buffer_put_char(e->output, replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS);
 }
 
 
@@ -1851,7 +1852,7 @@ process_get_variable(SocketEntry *e)
   Variable *v;
 	Buffer msg;
 
-  var= buffer_get_string(&e->request, &lvar);
+  var= buffer_get_string(e->request, &lvar);
 
 	buffer_init(&msg);
   if ((v = lookup_variable(var, lvar))) {
@@ -1863,8 +1864,8 @@ process_get_variable(SocketEntry *e)
     buffer_put_char(&msg, SSH_AGENT_NO_VARIABLE);
   }
   free(var);
-	buffer_put_int(&e->output, buffer_len(&msg));
-	buffer_append(&e->output, buffer_ptr(&msg), buffer_len(&msg));
+	buffer_put_int(e->output, buffer_len(&msg));
+	buffer_append(e->output, buffer_ptr(&msg), buffer_len(&msg));
 	buffer_free(&msg);
 }
 
@@ -1877,7 +1878,7 @@ process_list_variables(SocketEntry *e, char full)
   u_int lprefix, nret = 0;
   Variable *v;
 
-  prefix= buffer_get_string(&e->request, &lprefix);
+  prefix= buffer_get_string(e->request, &lprefix);
 	buffer_init(&msg);
 	TAILQ_FOREACH(v, &vartable.varlist, next) {
     if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
@@ -1891,9 +1892,9 @@ process_list_variables(SocketEntry *e, char full)
 	buffer_put_char(&msg2, full ?
 	    SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
 	buffer_put_int(&msg2, nret);
-	buffer_put_int(&e->output, buffer_len(&msg)+buffer_len(&msg2));
-	buffer_append(&e->output, buffer_ptr(&msg2), buffer_len(&msg2));
-	buffer_append(&e->output, buffer_ptr(&msg), buffer_len(&msg));
+	buffer_put_int(e->output, buffer_len(&msg)+buffer_len(&msg2));
+	buffer_append(e->output, buffer_ptr(&msg2), buffer_len(&msg2));
+	buffer_append(e->output, buffer_ptr(&msg), buffer_len(&msg));
 	buffer_free(&msg);
 }
 
@@ -1907,8 +1908,8 @@ no_variables(SocketEntry *e, u_int type)
 	    (type == SSH_AGENTC_LIST_VARIABLES) ?
 	    SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
 	buffer_put_int(&msg, 0);
-	buffer_put_int(&e->output, buffer_len(&msg));
-	buffer_append(&e->output, buffer_ptr(&msg), buffer_len(&msg));
+	buffer_put_int(e->output, buffer_len(&msg));
+	buffer_append(e->output, buffer_ptr(&msg), buffer_len(&msg));
 	buffer_free(&msg);
 }
 
@@ -1921,7 +1922,7 @@ process_remove_variable(SocketEntry *e)
 	char *var;
   Variable *v;
 
-  var= buffer_get_string(&e->request, &lvar);
+  var= buffer_get_string(e->request, &lvar);
 
   if ((v = lookup_variable(var, lvar))) {
     /*
@@ -1941,8 +1942,8 @@ process_remove_variable(SocketEntry *e)
     success = 1;
 	}
   free (var);
-	buffer_put_int(&e->output, 1);
-	buffer_put_char(&e->output,
+	buffer_put_int(e->output, 1);
+	buffer_put_char(e->output,
 	    success ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
 }
 
@@ -1953,7 +1954,7 @@ process_remove_all_variables(SocketEntry *e)
   u_int lprefix, ndel = 0;
   Variable *v, *last = NULL;
 
-  prefix= buffer_get_string(&e->request, &lprefix);
+  prefix= buffer_get_string(e->request, &lprefix);
 	TAILQ_FOREACH(v, &vartable.varlist, next) {
     if (last) {   /* don't remove variable until we've moved past it */
       TAILQ_REMOVE(&vartable.varlist, last, next);
@@ -1973,8 +1974,8 @@ process_remove_all_variables(SocketEntry *e)
   free(prefix);
 
 	/* Send success. */
-	buffer_put_int(&e->output, 1);
-	buffer_put_char(&e->output, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
+	buffer_put_int(e->output, 1);
+	buffer_put_char(e->output, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
 }
 
 /* dispatch incoming messages */
