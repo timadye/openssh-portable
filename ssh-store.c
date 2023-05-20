@@ -159,27 +159,27 @@ int
 main(int argc, char **argv)
 {
   extern int optind;
-	int agent_fd;
+  int agent_fd;
   int r, ch, set = 0, get = 0, list = 0, delete = 0, ret = 0;
 
-	ssh_malloc_init();	/* must be called before any mallocs */
+  ssh_malloc_init();  /* must be called before any mallocs */
   /* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
   sanitise_stdfd();
 
   __progname = ssh_get_progname(argv[0]);
 
-	/* First, get a connection to the authentication agent. */
-	switch (r = ssh_get_authentication_socket(&agent_fd)) {
-	case 0:
-		break;
-	case SSH_ERR_AGENT_NOT_PRESENT:
-		fprintf(stderr, "Could not open a connection to your "
-		    "authentication agent.\n");
-		exit(2);
-	default:
-		fprintf(stderr, "Error connecting to agent: %s\n", ssh_err(r));
-		exit(2);
-	}
+  /* First, get a connection to the authentication agent. */
+  switch (r = ssh_get_authentication_socket(&agent_fd)) {
+  case 0:
+    break;
+  case SSH_ERR_AGENT_NOT_PRESENT:
+    fprintf(stderr, "Could not open a connection to your "
+        "authentication agent.\n");
+    exit(2);
+  default:
+    fprintf(stderr, "Error connecting to agent: %s\n", ssh_err(r));
+    exit(2);
+  }
   while ((ch = getopt(argc, argv, "hsfglLdD")) != -1) {
     switch (ch) {
     case 's':
@@ -250,6 +250,6 @@ main(int argc, char **argv)
   }
   
 done:
-	ssh_close_authentication_socket(agent_fd);
+  ssh_close_authentication_socket(agent_fd);
   return (ret > 0 ? ret-1 : 10);
 }
