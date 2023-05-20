@@ -4,8 +4,8 @@ This will make ssh-store as well as special versions of ssh-agent, scp, and sftp
 PermitLocalCommand option that is not supported by older versions of the ssh
 client - useful if scp/sftp use the system default ssh).
 
-On Linux, to make executables with static SSL libraries (libcrypto, in openssl-static rpm),
-make with:
+This patch sets the following in configure.ac, which may only work on Linux.
+To make executables with static SSL libraries (libcrypto, in openssl-static rpm), make with:
 
   LIBS="-Wl,-Bstatic -lcrypto -Wl,-Bdynamic -lutil -lcrypt -lresolv -ldl -lz" ./configure
 

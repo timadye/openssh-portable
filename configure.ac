@@ -2434,7 +2434,7 @@ AC_ARG_WITH([ssl-engine],
 )
 
 if test "x$openssl" = "xyes" ; then
-	LIBS="-lcrypto $LIBS"
+	LIBS="-Wl,-Bstatic -lcrypto -Wl,-Bdynamic $LIBS"
 	AC_TRY_LINK_FUNC([RAND_add], [AC_DEFINE([HAVE_OPENSSL], [1],
 		[Define if your ssl headers are included
 		with #include <openssl/header.h>])],
