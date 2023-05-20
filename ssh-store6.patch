@@ -7,10 +7,10 @@ client - useful if scp/sftp use the system default ssh).
 On Linux, to make executables with static SSL libraries (libcrypto, in openssl-static rpm),
 make with:
 
-  make LIBS="-Wl,-Bstatic -lcrypto -Wl,-Bdynamic -lutil -lcrypt -lresolv -ldl -lz"
+  LIBS="-Wl,-Bstatic -lcrypto -Wl,-Bdynamic -lutil -lcrypt -lresolv -ldl -lz" ./configure
 
-or whatever configure lists as libraries (last line of summary) with -Wl,-Bstatic
-before the -lcrypto and -Wl,-Bdynamic after. Note that this only works for libcrypto
+(or 'make LIBS=...') or whatever configure lists as libraries (last line of summary) with
+-Wl,-Bstatic before the -lcrypto and -Wl,-Bdynamic after. Note that this only works for libcrypto
 (the other libraries need to be compiled with -fPIC), but that's OK as it is the
 only one that changes betweek CentOS7 and Alma9.
 
