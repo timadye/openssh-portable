@@ -83,9 +83,9 @@ input_kex_dh_gex_request(int type, u_int32_t seq, void *ctxt)
 	kex->nbits = nbits;
 	kex->min = min;
 	kex->max = max;
-	min = MAXIMUM(DH_GRP_MIN, min);
+	min = MAXIMUM(FIPS_mode() ? DH_GRP_MIN_FIPS : DH_GRP_MIN, min);
 	max = MINIMUM(DH_GRP_MAX, max);
-	nbits = MAXIMUM(DH_GRP_MIN, nbits);
+	nbits = MAXIMUM(FIPS_mode() ? DH_GRP_MIN_FIPS : DH_GRP_MIN, nbits);
 	nbits = MINIMUM(DH_GRP_MAX, nbits);
 
 	if (kex->max < kex->min || kex->nbits < kex->min ||

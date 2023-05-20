@@ -215,6 +215,12 @@ type_bits_valid(int type, const char *name, u_int32_t *bitsp)
 	    OPENSSL_DSA_MAX_MODULUS_BITS : OPENSSL_RSA_MAX_MODULUS_BITS;
 	if (*bitsp > maxbits)
 		fatal("key bits exceeds maximum %d", maxbits);
+	if (FIPS_mode()) {
+		if (type == KEY_DSA)
+			fatal("DSA keys are not allowed in FIPS mode");
+		if (type == KEY_ED25519)
+			fatal("ED25519 keys are not allowed in FIPS mode");
+	}
 	if (type == KEY_DSA && *bitsp != 1024)
 		fatal("DSA keys must be 1024 bits");
 	else if (type != KEY_ECDSA && type != KEY_ED25519 && *bitsp < 1024)

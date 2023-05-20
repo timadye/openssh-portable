@@ -31,6 +31,7 @@
 #include <sys/types.h>
 
 #include <stdarg.h>
+#include <string.h>
 
 #include "xmalloc.h"
 #include "key.h"
@@ -53,6 +54,40 @@ static int input_gssapi_mic(int type, u_int32_t plen, void *ctxt);
 static int input_gssapi_exchange_complete(int type, u_int32_t plen, void *ctxt);
 static int input_gssapi_errtok(int, u_int32_t, void *);
 
+/* 
+ * The 'gssapi_keyex' userauth mechanism.
+ */
+static int
+userauth_gsskeyex(Authctxt *authctxt)
+{
+	int authenticated = 0;
+	Buffer b;
+	gss_buffer_desc mic, gssbuf;
+	u_int len;
+
+	mic.value = packet_get_string(&len);
+	mic.length = len;
+
+	packet_check_eom();
+
+	ssh_gssapi_buildmic(&b, authctxt->user, authctxt->service,
+	    "gssapi-keyex");
+
+	gssbuf.value = buffer_ptr(&b);
+	gssbuf.length = buffer_len(&b);
+
+	/* gss_kex_context is NULL with privsep, so we can't check it here */
+	if (!GSS_ERROR(PRIVSEP(ssh_gssapi_checkmic(gss_kex_context, 
+	    &gssbuf, &mic))))
+		authenticated = PRIVSEP(ssh_gssapi_userok(authctxt->user,
+		    authctxt->pw));
+	
+	buffer_free(&b);
+	free(mic.value);
+
+	return (authenticated);
+}
+
 /*
  * We only support those mechanisms that we know about (ie ones that we know
  * how to check local user kuserok and the like)
@@ -67,9 +102,6 @@ userauth_gssapi(Authctxt *authctxt)
 	OM_uint32 ms;
 	u_int len;
 	u_char *doid = NULL;
-
-	if (!authctxt->valid || authctxt->user == NULL)
-		return (0);
 
 	mechs = packet_get_int();
 	if (mechs == 0) {
@@ -98,6 +130,12 @@ userauth_gssapi(Authctxt *authctxt)
 	if (!present) {
 		free(doid);
 		authctxt->server_caused_failure = 1;
+		return (0);
+	}
+
+	if (!authctxt->valid || authctxt->user == NULL) {
+		debug2("%s: disabled because of invalid user", __func__);
+		free(doid);
 		return (0);
 	}
 
@@ -238,7 +276,11 @@ input_gssapi_exchange_complete(int type, u_int32_t plen, void *ctxt)
 
 	packet_check_eom();
 
-	authenticated = PRIVSEP(ssh_gssapi_userok(authctxt->user));
+	authenticated = PRIVSEP(ssh_gssapi_userok(authctxt->user,
+	    authctxt->pw));
+
+	if (authenticated)
+		authctxt->last_details = ssh_gssapi_get_displayname();
 
 	authctxt->postponed = 0;
 	dispatch_set(SSH2_MSG_USERAUTH_GSSAPI_TOKEN, NULL);
@@ -255,6 +297,7 @@ input_gssapi_mic(int type, u_int32_t plen, void *ctxt)
 	Authctxt *authctxt = ctxt;
 	Gssctxt *gssctxt;
 	int authenticated = 0;
+	char *micuser;
 	Buffer b;
 	gss_buffer_desc mic, gssbuf;
 	u_int len;
@@ -267,18 +310,30 @@ input_gssapi_mic(int type, u_int32_t plen, void *ctxt)
 	mic.value = packet_get_string(&len);
 	mic.length = len;
 
-	ssh_gssapi_buildmic(&b, authctxt->user, authctxt->service,
+#ifdef WITH_SELINUX
+	if (authctxt->role && (strlen(authctxt->role) > 0))
+		xasprintf(&micuser, "%s/%s", authctxt->user, authctxt->role);
+	else
+#endif
+		micuser = authctxt->user;
+	ssh_gssapi_buildmic(&b, micuser, authctxt->service,
 	    "gssapi-with-mic");
 
 	gssbuf.value = buffer_ptr(&b);
 	gssbuf.length = buffer_len(&b);
 
 	if (!GSS_ERROR(PRIVSEP(ssh_gssapi_checkmic(gssctxt, &gssbuf, &mic))))
-		authenticated = PRIVSEP(ssh_gssapi_userok(authctxt->user));
+		authenticated = 
+		    PRIVSEP(ssh_gssapi_userok(authctxt->user, authctxt->pw));
 	else
 		logit("GSSAPI MIC check failed");
 
+	if (authenticated)
+		authctxt->last_details = ssh_gssapi_get_displayname();
+
 	buffer_free(&b);
+	if (micuser != authctxt->user)
+		free(micuser);
 	free(mic.value);
 
 	authctxt->postponed = 0;
@@ -289,6 +344,12 @@ input_gssapi_mic(int type, u_int32_t plen, void *ctxt)
 	userauth_finish(authctxt, authenticated, "gssapi-with-mic", NULL);
 	return 0;
 }
+
+Authmethod method_gsskeyex = {
+	"gssapi-keyex",
+	userauth_gsskeyex,
+	&options.gss_authentication
+};
 
 Authmethod method_gssapi = {
 	"gssapi-with-mic",

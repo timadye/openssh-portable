@@ -1290,6 +1290,12 @@ muxserver_listen(void)
 	oerrno = errno;
 	umask(old_umask);
 	if (muxserver_sock < 0) {
+		if (oerrno == ENAMETOOLONG) {
+			/* the error is already logged from unix_listener() */
+			error("ControlPath %s too long, "
+			    "disabling multiplexing", options.control_path);
+			goto disable_mux_master;
+		}
 		if (oerrno == EINVAL || oerrno == EADDRINUSE) {
 			error("ControlSocket %s already exists, "
 			    "disabling multiplexing", options.control_path);

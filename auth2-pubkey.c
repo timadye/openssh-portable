@@ -35,6 +35,7 @@
 # include <paths.h>
 #endif
 #include <pwd.h>
+#include <grp.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -79,16 +80,12 @@ userauth_pubkey(Authctxt *authctxt)
 {
 	Buffer b;
 	Key *key = NULL;
-	char *pkalg, *userstyle, *fp = NULL;
-	u_char *pkblob, *sig;
+	char *pkalg = NULL, *userstyle = NULL, *pubkey = NULL, *fp = NULL;
+	u_char *pkblob = NULL, *sig = NULL;
 	u_int alen, blen, slen;
 	int have_sig, pktype;
 	int authenticated = 0;
 
-	if (!authctxt->valid) {
-		debug2("%s: disabled because of invalid user", __func__);
-		return 0;
-	}
 	have_sig = packet_get_char();
 	if (datafellows & SSH_BUG_PKAUTH) {
 		debug2("%s: SSH_BUG_PKAUTH", __func__);
@@ -149,11 +146,19 @@ userauth_pubkey(Authctxt *authctxt)
 		} else {
 			buffer_put_string(&b, session_id2, session_id2_len);
 		}
+		if (!authctxt->valid || authctxt->user == NULL) {
+			buffer_free(&b);
+			debug2("%s: disabled because of invalid user",
+			    __func__);
+			goto done;
+		}
 		/* reconstruct packet */
 		buffer_put_char(&b, SSH2_MSG_USERAUTH_REQUEST);
-		xasprintf(&userstyle, "%s%s%s", authctxt->user,
+		xasprintf(&userstyle, "%s%s%s%s%s", authctxt->user,
 		    authctxt->style ? ":" : "",
-		    authctxt->style ? authctxt->style : "");
+		    authctxt->style ? authctxt->style : "",
+		    authctxt->role ? "/" : "",
+		    authctxt->role ? authctxt->role : "");
 		buffer_put_cstring(&b, userstyle);
 		free(userstyle);
 		buffer_put_cstring(&b,
@@ -171,25 +176,32 @@ userauth_pubkey(Authctxt *authctxt)
 #ifdef DEBUG_PK
 		buffer_dump(&b);
 #endif
-		pubkey_auth_info(authctxt, key, NULL);
-
+		pubkey = sshkey_format_oneline(key, options.fingerprint_hash);
+		auth_info(authctxt, "%s", pubkey);
 		/* test for correct signature */
 		authenticated = 0;
 		if (PRIVSEP(user_key_allowed(authctxt->pw, key, 1)) &&
-		    PRIVSEP(key_verify(key, sig, slen, buffer_ptr(&b),
+		    PRIVSEP(user_key_verify(key, sig, slen, buffer_ptr(&b),
 		    buffer_len(&b))) == 1) {
 			authenticated = 1;
+			authctxt->last_details = pubkey;
 			/* Record the successful key to prevent reuse */
 			auth2_record_userkey(authctxt, key);
 			key = NULL; /* Don't free below */
+		} else {
+			free(pubkey);
 		}
 		buffer_free(&b);
-		free(sig);
 	} else {
 		debug("%s: test whether pkalg/pkblob are acceptable for %s %s",
 		    __func__, sshkey_type(key), fp);
 		packet_check_eom();
 
+		if (!authctxt->valid || authctxt->user == NULL) {
+			debug2("%s: disabled because of invalid user",
+			    __func__);
+			goto done;
+		}
 		/* XXX fake reply and always send PK_OK ? */
 		/*
 		 * XXX this allows testing whether a user is allowed
@@ -216,13 +228,14 @@ done:
 	free(pkalg);
 	free(pkblob);
 	free(fp);
+	free(sig);
 	return authenticated;
 }
 
 void
 pubkey_auth_info(Authctxt *authctxt, const Key *key, const char *fmt, ...)
 {
-	char *fp, *extra;
+	char *extra, *pubkey;
 	va_list ap;
 	int i;
 
@@ -232,28 +245,26 @@ pubkey_auth_info(Authctxt *authctxt, const Key *key, const char *fmt, ...)
 		i = vasprintf(&extra, fmt, ap);
 		va_end(ap);
 		if (i < 0 || extra == NULL)
-			fatal("%s: vasprintf failed", __func__);	
+			fatal("%s: vasprintf failed", __func__);
 	}
 
-	if (key_is_cert(key)) {
-		fp = sshkey_fingerprint(key->cert->signature_key,
-		    options.fingerprint_hash, SSH_FP_DEFAULT);
-		auth_info(authctxt, "%s ID %s (serial %llu) CA %s %s%s%s", 
-		    key_type(key), key->cert->key_id,
-		    (unsigned long long)key->cert->serial,
-		    key_type(key->cert->signature_key),
-		    fp == NULL ? "(null)" : fp,
-		    extra == NULL ? "" : ", ", extra == NULL ? "" : extra);
-		free(fp);
-	} else {
-		fp = sshkey_fingerprint(key, options.fingerprint_hash,
-		    SSH_FP_DEFAULT);
-		auth_info(authctxt, "%s %s%s%s", key_type(key),
-		    fp == NULL ? "(null)" : fp,
-		    extra == NULL ? "" : ", ", extra == NULL ? "" : extra);
-		free(fp);
-	}
+	pubkey = sshkey_format_oneline(key, options.fingerprint_hash);
+	auth_info(authctxt, "%s%s%s", pubkey, extra == NULL ? "" : ", ",
+	    extra == NULL ? "" : extra);
+	free(pubkey);
 	free(extra);
+}
+
+int
+user_key_verify(const Key *key, const u_char *sig, u_int slen, const u_char *data, u_int datalen)
+{
+	int rv;
+
+	rv = key_verify(key, sig, slen, data, datalen);
+#ifdef SSH_AUDIT_EVENTS
+	audit_key(1, &rv, key);
+#endif
+	return rv;
 }
 
 /*
@@ -476,6 +487,12 @@ subprocess(const char *tag, struct passwd *pw, const char *command,
 		}
 		closefrom(STDERR_FILENO + 1);
 
+		if (geteuid() == 0 &&
+		    initgroups(pw->pw_name, pw->pw_gid) == -1) {
+			error("%s: initgroups(%s, %u): %s", tag,
+			    pw->pw_name, (u_int)pw->pw_gid, strerror(errno));
+			_exit(1);
+		}
 		/* Don't use permanently_set_uid() here to avoid fatal() */
 		if (setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) != 0) {
 			error("%s: setresgid %u: %s", tag, (u_int)pw->pw_gid,
@@ -726,6 +743,9 @@ match_principals_command(struct passwd *user_pw, const struct sshkey *key)
 	temporarily_use_uid(pw);
 
 	ok = process_principals(f, NULL, pw, cert);
+
+	fclose(f);
+	f = NULL;
 
 	if (exited_cleanly(pid, "AuthorizedPrincipalsCommand", command) != 0)
 		goto out;
@@ -1041,6 +1061,14 @@ user_key_command_allowed2(struct passwd *user_pw, Key *key)
 		xasprintf(&command, "%s %s", av[0], av[1]);
 	}
 
+#ifdef WITH_SELINUX
+		if (sshd_selinux_setup_env_variables() < 0) {
+			error ("failed to copy environment:  %s",
+			    strerror(errno));
+			_exit(127);
+		}
+#endif
+
 	if ((pid = subprocess("AuthorizedKeysCommand", pw, command,
 	    ac, av, &f)) == 0)
 		goto out;
@@ -1049,6 +1077,9 @@ user_key_command_allowed2(struct passwd *user_pw, Key *key)
 	temporarily_use_uid(pw);
 
 	ok = check_authkeys_file(f, options.authorized_keys_command, key, pw);
+
+	fclose(f);
+	f = NULL;
 
 	if (exited_cleanly(pid, "AuthorizedKeysCommand", command) != 0)
 		goto out;

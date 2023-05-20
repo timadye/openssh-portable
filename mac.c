@@ -27,6 +27,8 @@
 
 #include <sys/types.h>
 
+#include <openssl/fips.h>
+
 #include <string.h>
 #include <stdio.h>
 
@@ -54,7 +56,7 @@ struct macalg {
 	int		etm;		/* Encrypt-then-MAC */
 };
 
-static const struct macalg macs[] = {
+static const struct macalg all_macs[] = {
 	/* Encrypt-and-MAC (encrypt-and-authenticate) variants */
 	{ "hmac-sha1",				SSH_DIGEST, SSH_DIGEST_SHA1, 0, 0, 0, 0 },
 	{ "hmac-sha1-96",			SSH_DIGEST, SSH_DIGEST_SHA1, 96, 0, 0, 0 },
@@ -89,6 +91,24 @@ static const struct macalg macs[] = {
 	{ NULL,					0, 0, 0, 0, 0, 0 }
 };
 
+static const struct macalg fips_macs[] = {
+	/* Encrypt-and-MAC (encrypt-and-authenticate) variants */
+	{ "hmac-sha1",				SSH_DIGEST, SSH_DIGEST_SHA1, 0, 0, 0, 0 },
+#ifdef HAVE_EVP_SHA256
+	{ "hmac-sha2-256",			SSH_DIGEST, SSH_DIGEST_SHA256, 0, 0, 0, 0 },
+	{ "hmac-sha2-512",			SSH_DIGEST, SSH_DIGEST_SHA512, 0, 0, 0, 0 },
+#endif
+
+	/* Encrypt-then-MAC variants */
+	{ "hmac-sha1-etm@openssh.com",		SSH_DIGEST, SSH_DIGEST_SHA1, 0, 0, 0, 1 },
+#ifdef HAVE_EVP_SHA256
+	{ "hmac-sha2-256-etm@openssh.com",	SSH_DIGEST, SSH_DIGEST_SHA256, 0, 0, 0, 1 },
+	{ "hmac-sha2-512-etm@openssh.com",	SSH_DIGEST, SSH_DIGEST_SHA512, 0, 0, 0, 1 },
+#endif
+
+	{ NULL,					0, 0, 0, 0, 0, 0 }
+};
+
 /* Returns a list of supported MACs separated by the specified char. */
 char *
 mac_alg_list(char sep)
@@ -97,7 +117,7 @@ mac_alg_list(char sep)
 	size_t nlen, rlen = 0;
 	const struct macalg *m;
 
-	for (m = macs; m->name != NULL; m++) {
+	for (m = FIPS_mode() ? fips_macs : all_macs; m->name != NULL; m++) {
 		if (ret != NULL)
 			ret[rlen++] = sep;
 		nlen = strlen(m->name);
@@ -136,7 +156,7 @@ mac_setup(struct sshmac *mac, char *name)
 {
 	const struct macalg *m;
 
-	for (m = macs; m->name != NULL; m++) {
+	for (m = FIPS_mode() ? fips_macs : all_macs; m->name != NULL; m++) {
 		if (strcmp(name, m->name) != 0)
 			continue;
 		if (mac != NULL)
@@ -247,6 +267,20 @@ mac_clear(struct sshmac *mac)
 		ssh_hmac_free(mac->hmac_ctx);
 	mac->hmac_ctx = NULL;
 	mac->umac_ctx = NULL;
+}
+
+void
+mac_destroy(struct sshmac *mac)
+{
+	if (mac == NULL)
+		return;
+
+	if (mac->key) {
+		memset(mac->key, 0, mac->key_len);
+		free(mac->key);
+	}
+
+	memset(mac, 0, sizeof(*mac));
 }
 
 /* XXX copied from ciphers_valid */

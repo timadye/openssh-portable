@@ -57,6 +57,7 @@
 #include "auth.h"
 #include "myproposal.h"
 #include "digest.h"
+#include "ssh-gss.h"
 
 static void add_listen_addr(ServerOptions *, char *, int);
 static void add_one_listen_addr(ServerOptions *, char *, int);
@@ -94,6 +95,7 @@ initialize_server_options(ServerOptions *options)
 	options->print_lastlog = -1;
 	options->x11_forwarding = -1;
 	options->x11_display_offset = -1;
+	options->x11_max_displays = -1;
 	options->x11_use_localhost = -1;
 	options->permit_tty = -1;
 	options->permit_user_rc = -1;
@@ -113,8 +115,11 @@ initialize_server_options(ServerOptions *options)
 	options->kerberos_ticket_cleanup = -1;
 	options->kerberos_get_afs_token = -1;
 	options->gss_authentication=-1;
+	options->gss_keyex = -1;
 	options->gss_cleanup_creds = -1;
 	options->gss_strict_acceptor = -1;
+	options->gss_store_rekey = -1;
+	options->gss_kex_algorithms = NULL;
 	options->password_authentication = -1;
 	options->kbd_interactive_authentication = -1;
 	options->challenge_response_authentication = -1;
@@ -143,6 +148,7 @@ initialize_server_options(ServerOptions *options)
 	options->max_authtries = -1;
 	options->max_sessions = -1;
 	options->banner = NULL;
+	options->show_patchlevel = -1;
 	options->use_dns = -1;
 	options->client_alive_interval = -1;
 	options->client_alive_count_max = -1;
@@ -162,6 +168,9 @@ initialize_server_options(ServerOptions *options)
 	options->ip_qos_interactive = -1;
 	options->ip_qos_bulk = -1;
 	options->version_addendum = NULL;
+	options->use_kuserok = -1;
+	options->enable_k5users = -1;
+	options->expose_auth_methods = -1;
 	options->fingerprint_hash = -1;
 	options->disable_forwarding = -1;
 }
@@ -176,14 +185,20 @@ option_clear_or_none(const char *o)
 static void
 assemble_algorithms(ServerOptions *o)
 {
-	if (kex_assemble_names(KEX_SERVER_ENCRYPT, &o->ciphers) != 0 ||
-	    kex_assemble_names(KEX_SERVER_MAC, &o->macs) != 0 ||
-	    kex_assemble_names(KEX_SERVER_KEX, &o->kex_algorithms) != 0 ||
-	    kex_assemble_names(KEX_DEFAULT_PK_ALG,
+	if (kex_assemble_names((FIPS_mode() ? KEX_FIPS_ENCRYPT
+	        : KEX_SERVER_ENCRYPT), &o->ciphers) != 0 ||
+	    kex_assemble_names((FIPS_mode() ? KEX_FIPS_MAC
+	        : KEX_SERVER_MAC), &o->macs) != 0 ||
+	    kex_assemble_names((FIPS_mode() ? KEX_DEFAULT_KEX_FIPS
+	        : KEX_SERVER_KEX), &o->kex_algorithms) != 0 ||
+	    kex_assemble_names((FIPS_mode() ? KEX_FIPS_PK_ALG
+	        : KEX_DEFAULT_PK_ALG),
 	    &o->hostkeyalgorithms) != 0 ||
-	    kex_assemble_names(KEX_DEFAULT_PK_ALG,
+	    kex_assemble_names((FIPS_mode() ? KEX_FIPS_PK_ALG
+	        : KEX_DEFAULT_PK_ALG),
 	    &o->hostbased_key_types) != 0 ||
-	    kex_assemble_names(KEX_DEFAULT_PK_ALG, &o->pubkey_key_types) != 0)
+	    kex_assemble_names((FIPS_mode() ? KEX_FIPS_PK_ALG
+	        : KEX_DEFAULT_PK_ALG), &o->pubkey_key_types) != 0)
 		fatal("kex_assemble_names failed");
 }
 
@@ -222,7 +237,7 @@ fill_default_server_options(ServerOptions *options)
 	if (options->login_grace_time == -1)
 		options->login_grace_time = 120;
 	if (options->permit_root_login == PERMIT_NOT_SET)
-		options->permit_root_login = PERMIT_NO_PASSWD;
+		options->permit_root_login = PERMIT_YES;
 	if (options->ignore_rhosts == -1)
 		options->ignore_rhosts = 1;
 	if (options->ignore_user_known_hosts == -1)
@@ -235,6 +250,8 @@ fill_default_server_options(ServerOptions *options)
 		options->x11_forwarding = 0;
 	if (options->x11_display_offset == -1)
 		options->x11_display_offset = 10;
+	if (options->x11_max_displays == -1)
+		options->x11_max_displays = DEFAULT_MAX_DISPLAYS;
 	if (options->x11_use_localhost == -1)
 		options->x11_use_localhost = 1;
 	if (options->xauth_location == NULL)
@@ -267,10 +284,18 @@ fill_default_server_options(ServerOptions *options)
 		options->kerberos_get_afs_token = 0;
 	if (options->gss_authentication == -1)
 		options->gss_authentication = 0;
+	if (options->gss_keyex == -1)
+		options->gss_keyex = 0;
 	if (options->gss_cleanup_creds == -1)
 		options->gss_cleanup_creds = 1;
 	if (options->gss_strict_acceptor == -1)
-		options->gss_strict_acceptor = 0;
+		options->gss_strict_acceptor = 1;
+	if (options->gss_store_rekey == -1)
+		options->gss_store_rekey = 0;
+#ifdef GSSAPI
+	if (options->gss_kex_algorithms == NULL)
+		options->gss_kex_algorithms = strdup(GSS_KEX_DEFAULT_KEX);
+#endif
 	if (options->password_authentication == -1)
 		options->password_authentication = 1;
 	if (options->kbd_interactive_authentication == -1)
@@ -306,7 +331,7 @@ fill_default_server_options(ServerOptions *options)
 	if (options->max_sessions == -1)
 		options->max_sessions = DEFAULT_SESSIONS_MAX;
 	if (options->use_dns == -1)
-		options->use_dns = 0;
+		options->use_dns = 1;
 	if (options->client_alive_interval == -1)
 		options->client_alive_interval = 0;
 	if (options->client_alive_count_max == -1)
@@ -325,6 +350,14 @@ fill_default_server_options(ServerOptions *options)
 		options->ip_qos_bulk = IPTOS_THROUGHPUT;
 	if (options->version_addendum == NULL)
 		options->version_addendum = xstrdup("");
+	if (options->show_patchlevel == -1)
+		options->show_patchlevel = 0;
+	if (options->use_kuserok == -1)
+		options->use_kuserok = 1;
+	if (options->enable_k5users == -1)
+		options->enable_k5users = 0;
+	if (options->expose_auth_methods == -1)
+		options->expose_auth_methods = EXPOSE_AUTHMETH_NEVER;
 	if (options->fwd_opts.streamlocal_bind_mask == (mode_t)-1)
 		options->fwd_opts.streamlocal_bind_mask = 0177;
 	if (options->fwd_opts.streamlocal_bind_unlink == -1)
@@ -390,24 +423,24 @@ typedef enum {
 	sPermitRootLogin, sLogFacility, sLogLevel,
 	sRhostsRSAAuthentication, sRSAAuthentication,
 	sKerberosAuthentication, sKerberosOrLocalPasswd, sKerberosTicketCleanup,
-	sKerberosGetAFSToken,
+	sKerberosGetAFSToken, sKerberosUseKuserok,
 	sKerberosTgtPassing, sChallengeResponseAuthentication,
 	sPasswordAuthentication, sKbdInteractiveAuthentication,
 	sListenAddress, sAddressFamily,
 	sPrintMotd, sPrintLastLog, sIgnoreRhosts,
-	sX11Forwarding, sX11DisplayOffset, sX11UseLocalhost,
+	sX11Forwarding, sX11DisplayOffset, sX11MaxDisplays, sX11UseLocalhost,
 	sPermitTTY, sStrictModes, sEmptyPasswd, sTCPKeepAlive,
 	sPermitUserEnvironment, sAllowTcpForwarding, sCompression,
 	sRekeyLimit, sAllowUsers, sDenyUsers, sAllowGroups, sDenyGroups,
 	sIgnoreUserKnownHosts, sCiphers, sMacs, sPidFile,
 	sGatewayPorts, sPubkeyAuthentication, sPubkeyAcceptedKeyTypes,
 	sXAuthLocation, sSubsystem, sMaxStartups, sMaxAuthTries, sMaxSessions,
-	sBanner, sUseDNS, sHostbasedAuthentication,
+	sBanner, sShowPatchLevel, sUseDNS, sHostbasedAuthentication,
 	sHostbasedUsesNameFromPacketOnly, sHostbasedAcceptedKeyTypes,
 	sHostKeyAlgorithms,
 	sClientAliveInterval, sClientAliveCountMax, sAuthorizedKeysFile,
-	sGssAuthentication, sGssCleanupCreds, sGssStrictAcceptor,
-	sAcceptEnv, sPermitTunnel,
+	sGssAuthentication, sGssCleanupCreds, sGssEnablek5users, sGssStrictAcceptor,
+	sGssKeyEx, sGssStoreRekey, sGssKexAlgorithms, sAcceptEnv, sPermitTunnel,
 	sMatch, sPermitOpen, sForceCommand, sChrootDirectory,
 	sUsePrivilegeSeparation, sAllowAgentForwarding,
 	sHostCertificate,
@@ -418,6 +451,7 @@ typedef enum {
 	sAuthenticationMethods, sHostKeyAgent, sPermitUserRC,
 	sStreamLocalBindMask, sStreamLocalBindUnlink,
 	sAllowStreamLocalForwarding, sFingerprintHash, sDisableForwarding,
+	sExposeAuthenticationMethods,
 	sDeprecated, sIgnore, sUnsupported
 } ServerOpCodes;
 
@@ -469,11 +503,13 @@ static struct {
 #else
 	{ "kerberosgetafstoken", sUnsupported, SSHCFG_GLOBAL },
 #endif
+	{ "kerberosusekuserok", sKerberosUseKuserok, SSHCFG_ALL },
 #else
 	{ "kerberosauthentication", sUnsupported, SSHCFG_ALL },
 	{ "kerberosorlocalpasswd", sUnsupported, SSHCFG_GLOBAL },
 	{ "kerberosticketcleanup", sUnsupported, SSHCFG_GLOBAL },
 	{ "kerberosgetafstoken", sUnsupported, SSHCFG_GLOBAL },
+	{ "kerberosusekuserok", sUnsupported, SSHCFG_ALL },
 #endif
 	{ "kerberostgtpassing", sUnsupported, SSHCFG_GLOBAL },
 	{ "afstokenpassing", sUnsupported, SSHCFG_GLOBAL },
@@ -481,11 +517,21 @@ static struct {
 	{ "gssapiauthentication", sGssAuthentication, SSHCFG_ALL },
 	{ "gssapicleanupcredentials", sGssCleanupCreds, SSHCFG_GLOBAL },
 	{ "gssapistrictacceptorcheck", sGssStrictAcceptor, SSHCFG_GLOBAL },
+	{ "gssapikeyexchange", sGssKeyEx, SSHCFG_GLOBAL },
+	{ "gssapistorecredentialsonrekey", sGssStoreRekey, SSHCFG_GLOBAL },
+	{ "gssapienablek5users", sGssEnablek5users, SSHCFG_ALL },
+	{ "gssapikexalgorithms", sGssKexAlgorithms, SSHCFG_GLOBAL },
 #else
 	{ "gssapiauthentication", sUnsupported, SSHCFG_ALL },
 	{ "gssapicleanupcredentials", sUnsupported, SSHCFG_GLOBAL },
 	{ "gssapistrictacceptorcheck", sUnsupported, SSHCFG_GLOBAL },
+	{ "gssapikeyexchange", sUnsupported, SSHCFG_GLOBAL },
+	{ "gssapistorecredentialsonrekey", sUnsupported, SSHCFG_GLOBAL },
+	{ "gssapienablek5users", sUnsupported, SSHCFG_ALL },
+	{ "gssapikexalgorithms", sUnsupported, SSHCFG_GLOBAL },
 #endif
+	{ "gssusesessionccache", sUnsupported, SSHCFG_GLOBAL },
+	{ "gssapiusesessioncredcache", sUnsupported, SSHCFG_GLOBAL },
 	{ "passwordauthentication", sPasswordAuthentication, SSHCFG_ALL },
 	{ "kbdinteractiveauthentication", sKbdInteractiveAuthentication, SSHCFG_ALL },
 	{ "challengeresponseauthentication", sChallengeResponseAuthentication, SSHCFG_GLOBAL },
@@ -503,6 +549,7 @@ static struct {
 	{ "ignoreuserknownhosts", sIgnoreUserKnownHosts, SSHCFG_GLOBAL },
 	{ "x11forwarding", sX11Forwarding, SSHCFG_ALL },
 	{ "x11displayoffset", sX11DisplayOffset, SSHCFG_ALL },
+	{ "x11maxdisplays", sX11MaxDisplays, SSHCFG_ALL },
 	{ "x11uselocalhost", sX11UseLocalhost, SSHCFG_ALL },
 	{ "xauthlocation", sXAuthLocation, SSHCFG_GLOBAL },
 	{ "strictmodes", sStrictModes, SSHCFG_GLOBAL },
@@ -528,6 +575,7 @@ static struct {
 	{ "maxauthtries", sMaxAuthTries, SSHCFG_ALL },
 	{ "maxsessions", sMaxSessions, SSHCFG_ALL },
 	{ "banner", sBanner, SSHCFG_ALL },
+	{ "showpatchlevel", sShowPatchLevel, SSHCFG_GLOBAL },
 	{ "usedns", sUseDNS, SSHCFG_GLOBAL },
 	{ "verifyreversemapping", sDeprecated, SSHCFG_GLOBAL },
 	{ "reversemappingcheck", sDeprecated, SSHCFG_GLOBAL },
@@ -561,6 +609,7 @@ static struct {
 	{ "allowstreamlocalforwarding", sAllowStreamLocalForwarding, SSHCFG_ALL },
 	{ "fingerprinthash", sFingerprintHash, SSHCFG_GLOBAL },
 	{ "disableforwarding", sDisableForwarding, SSHCFG_ALL },
+	{ "exposeauthenticationmethods", sExposeAuthenticationMethods, SSHCFG_ALL },
 	{ NULL, sBadOption, 0 }
 };
 
@@ -950,6 +999,12 @@ static const struct multistate multistate_tcpfwd[] = {
 	{ "local",			FORWARD_LOCAL },
 	{ NULL, -1 }
 };
+static const struct multistate multistate_exposeauthmeth[] = {
+	{ "never",			EXPOSE_AUTHMETH_NEVER },
+	{ "pam-only",			EXPOSE_AUTHMETH_PAMONLY },
+	{ "pam-and-env",		EXPOSE_AUTHMETH_PAMENV },
+	{ NULL, -1}
+};
 
 int
 process_server_config_line(ServerOptions *options, char *line,
@@ -1170,7 +1225,7 @@ process_server_config_line(ServerOptions *options, char *line,
 			    filename, linenum);
 		if (!sshkey_names_valid2(*arg == '+' ? arg + 1 : arg, 1))
 			fatal("%s line %d: Bad key types '%s'.",
-			    filename, linenum, arg ? arg : "<NONE>");
+			    filename, linenum, arg);
 		if (*activep && *charptr == NULL)
 			*charptr = xstrdup(arg);
 		break;
@@ -1207,6 +1262,10 @@ process_server_config_line(ServerOptions *options, char *line,
 		intptr = &options->gss_authentication;
 		goto parse_flag;
 
+	case sGssKeyEx:
+		intptr = &options->gss_keyex;
+		goto parse_flag;
+
 	case sGssCleanupCreds:
 		intptr = &options->gss_cleanup_creds;
 		goto parse_flag;
@@ -1214,6 +1273,22 @@ process_server_config_line(ServerOptions *options, char *line,
 	case sGssStrictAcceptor:
 		intptr = &options->gss_strict_acceptor;
 		goto parse_flag;
+
+	case sGssStoreRekey:
+		intptr = &options->gss_store_rekey;
+		goto parse_flag;
+
+	case sGssKexAlgorithms:
+		arg = strdelim(&cp);
+		if (!arg || *arg == '\0')
+			fatal("%.200s line %d: Missing argument.",
+			    filename, linenum);
+		if (!gss_kex_names_valid(arg))
+			fatal("%.200s line %d: Bad GSSAPI KexAlgorithms '%s'.",
+			    filename, linenum, arg ? arg : "<NONE>");
+		if (*activep && options->gss_kex_algorithms == NULL)
+			options->gss_kex_algorithms = strdup(arg);
+		break;
 
 	case sPasswordAuthentication:
 		intptr = &options->password_authentication;
@@ -1250,6 +1325,10 @@ process_server_config_line(ServerOptions *options, char *line,
 		if (*activep && *intptr == -1)
 			*intptr = value;
 		break;
+
+	case sX11MaxDisplays:
+		intptr = &options->x11_max_displays;
+		goto parse_int;
 
 	case sX11UseLocalhost:
 		intptr = &options->x11_use_localhost;
@@ -1369,6 +1448,10 @@ process_server_config_line(ServerOptions *options, char *line,
 		multistate_ptr = multistate_privsep;
 		goto parse_multistate;
 
+	case sShowPatchLevel:
+		intptr = &options->show_patchlevel;
+		goto parse_flag;
+
 	case sAllowUsers:
 		while ((arg = strdelim(&cp)) && *arg != '\0') {
 			if (options->num_allow_users >= MAX_ALLOW_USERS)
@@ -1429,7 +1512,7 @@ process_server_config_line(ServerOptions *options, char *line,
 			fatal("%s line %d: Missing argument.", filename, linenum);
 		if (!ciphers_valid(*arg == '+' ? arg + 1 : arg))
 			fatal("%s line %d: Bad SSH2 cipher spec '%s'.",
-			    filename, linenum, arg ? arg : "<NONE>");
+			    filename, linenum, arg);
 		if (options->ciphers == NULL)
 			options->ciphers = xstrdup(arg);
 		break;
@@ -1440,7 +1523,7 @@ process_server_config_line(ServerOptions *options, char *line,
 			fatal("%s line %d: Missing argument.", filename, linenum);
 		if (!mac_valid(*arg == '+' ? arg + 1 : arg))
 			fatal("%s line %d: Bad SSH2 mac spec '%s'.",
-			    filename, linenum, arg ? arg : "<NONE>");
+			    filename, linenum, arg);
 		if (options->macs == NULL)
 			options->macs = xstrdup(arg);
 		break;
@@ -1452,7 +1535,7 @@ process_server_config_line(ServerOptions *options, char *line,
 			    filename, linenum);
 		if (!kex_names_valid(*arg == '+' ? arg + 1 : arg))
 			fatal("%s line %d: Bad SSH2 KexAlgorithms '%s'.",
-			    filename, linenum, arg ? arg : "<NONE>");
+			    filename, linenum, arg);
 		if (options->kex_algorithms == NULL)
 			options->kex_algorithms = xstrdup(arg);
 		break;
@@ -1467,7 +1550,7 @@ process_server_config_line(ServerOptions *options, char *line,
 			fatal("%s line %d: Missing subsystem name.",
 			    filename, linenum);
 		if (!*activep) {
-			arg = strdelim(&cp);
+			/*arg =*/ (void) strdelim(&cp);
 			break;
 		}
 		for (i = 0; i < options->num_subsystems; i++)
@@ -1558,8 +1641,9 @@ process_server_config_line(ServerOptions *options, char *line,
 		if (*activep && *charptr == NULL) {
 			*charptr = tilde_expand_filename(arg, getuid());
 			/* increase optional counter */
-			if (intptr != NULL)
-				*intptr = *intptr + 1;
+			/* DEAD CODE intptr is still NULL ;)
+  			 if (intptr != NULL)
+				*intptr = *intptr + 1; */
 		}
 		break;
 
@@ -1615,6 +1699,14 @@ process_server_config_line(ServerOptions *options, char *line,
 			    linenum);
 		*activep = value;
 		break;
+
+	case sKerberosUseKuserok:
+		intptr = &options->use_kuserok;
+		goto parse_flag;
+
+	case sGssEnablek5users:
+		intptr = &options->enable_k5users;
+		goto parse_flag;
 
 	case sPermitOpen:
 		arg = strdelim(&cp);
@@ -1836,6 +1928,11 @@ process_server_config_line(ServerOptions *options, char *line,
 			options->fingerprint_hash = value;
 		break;
 
+	case sExposeAuthenticationMethods:
+		intptr = &options->expose_auth_methods;
+		multistate_ptr = multistate_exposeauthmeth;
+		goto parse_multistate;
+
 	case sDeprecated:
 	case sIgnore:
 	case sUnsupported:
@@ -1960,6 +2057,8 @@ copy_set_server_options(ServerOptions *dst, ServerOptions *src, int preauth)
 		dst->n = src->n; \
 } while (0)
 
+	u_int i;
+
 	M_CP_INTOPT(password_authentication);
 	M_CP_INTOPT(gss_authentication);
 	M_CP_INTOPT(pubkey_authentication);
@@ -1979,6 +2078,7 @@ copy_set_server_options(ServerOptions *dst, ServerOptions *src, int preauth)
 	M_CP_INTOPT(fwd_opts.streamlocal_bind_unlink);
 	M_CP_INTOPT(x11_display_offset);
 	M_CP_INTOPT(x11_forwarding);
+	M_CP_INTOPT(x11_max_displays);
 	M_CP_INTOPT(x11_use_localhost);
 	M_CP_INTOPT(permit_tty);
 	M_CP_INTOPT(permit_user_rc);
@@ -1988,8 +2088,11 @@ copy_set_server_options(ServerOptions *dst, ServerOptions *src, int preauth)
 	M_CP_INTOPT(client_alive_interval);
 	M_CP_INTOPT(ip_qos_interactive);
 	M_CP_INTOPT(ip_qos_bulk);
+	M_CP_INTOPT(use_kuserok);
+	M_CP_INTOPT(enable_k5users);
 	M_CP_INTOPT(rekey_limit);
 	M_CP_INTOPT(rekey_interval);
+	M_CP_INTOPT(expose_auth_methods);
 
 	/*
 	 * The bind_mask is a mode_t that may be unsigned, so we can't use
@@ -2010,8 +2113,10 @@ copy_set_server_options(ServerOptions *dst, ServerOptions *src, int preauth)
 } while(0)
 #define M_CP_STRARRAYOPT(n, num_n) do {\
 	if (src->num_n != 0) { \
+		for (i = 0; i < dst->num_n; i++) \
+			free(dst->n[i]); \
 		for (dst->num_n = 0; dst->num_n < src->num_n; dst->num_n++) \
-			dst->n[dst->num_n] = xstrdup(src->n[dst->num_n]); \
+			dst->n[dst->num_n] = src->n[dst->num_n]; \
 	} \
 } while(0)
 
@@ -2104,6 +2209,8 @@ fmt_intarg(ServerOpCodes code, int val)
 		return fmt_multistate_int(val, multistate_tcpfwd);
 	case sFingerprintHash:
 		return ssh_digest_alg_name(val);
+	case sExposeAuthenticationMethods:
+		return fmt_multistate_int(val, multistate_exposeauthmeth);
 	default:
 		switch (val) {
 		case 0:
@@ -2148,8 +2255,6 @@ dump_cfg_fmtint(ServerOpCodes code, int val)
 static void
 dump_cfg_string(ServerOpCodes code, const char *val)
 {
-	if (val == NULL)
-		return;
 	printf("%s %s\n", lookup_opcode_name(code),
 	    val == NULL ? "none" : val);
 }
@@ -2224,6 +2329,7 @@ dump_config(ServerOptions *o)
 #endif
 	dump_cfg_int(sLoginGraceTime, o->login_grace_time);
 	dump_cfg_int(sX11DisplayOffset, o->x11_display_offset);
+	dump_cfg_int(sX11MaxDisplays, o->x11_max_displays);
 	dump_cfg_int(sMaxAuthTries, o->max_authtries);
 	dump_cfg_int(sMaxSessions, o->max_sessions);
 	dump_cfg_int(sClientAliveInterval, o->client_alive_interval);
@@ -2249,6 +2355,10 @@ dump_config(ServerOptions *o)
 #ifdef GSSAPI
 	dump_cfg_fmtint(sGssAuthentication, o->gss_authentication);
 	dump_cfg_fmtint(sGssCleanupCreds, o->gss_cleanup_creds);
+	dump_cfg_fmtint(sGssKeyEx, o->gss_keyex);
+	dump_cfg_fmtint(sGssStrictAcceptor, o->gss_strict_acceptor);
+	dump_cfg_fmtint(sGssStoreRekey, o->gss_store_rekey);
+	dump_cfg_string(sGssKexAlgorithms, o->gss_kex_algorithms);
 #endif
 	dump_cfg_fmtint(sPasswordAuthentication, o->password_authentication);
 	dump_cfg_fmtint(sKbdInteractiveAuthentication,
@@ -2269,6 +2379,7 @@ dump_config(ServerOptions *o)
 	dump_cfg_fmtint(sPermitUserEnvironment, o->permit_user_env);
 	dump_cfg_fmtint(sCompression, o->compression);
 	dump_cfg_fmtint(sGatewayPorts, o->fwd_opts.gateway_ports);
+	dump_cfg_fmtint(sShowPatchLevel, o->show_patchlevel);
 	dump_cfg_fmtint(sUseDNS, o->use_dns);
 	dump_cfg_fmtint(sAllowTcpForwarding, o->allow_tcp_forwarding);
 	dump_cfg_fmtint(sAllowAgentForwarding, o->allow_agent_forwarding);
@@ -2276,14 +2387,19 @@ dump_config(ServerOptions *o)
 	dump_cfg_fmtint(sAllowStreamLocalForwarding, o->allow_streamlocal_forwarding);
 	dump_cfg_fmtint(sStreamLocalBindUnlink, o->fwd_opts.streamlocal_bind_unlink);
 	dump_cfg_fmtint(sUsePrivilegeSeparation, use_privsep);
+	dump_cfg_fmtint(sKerberosUseKuserok, o->use_kuserok);
+	dump_cfg_fmtint(sGssEnablek5users, o->enable_k5users);
+	dump_cfg_fmtint(sExposeAuthenticationMethods, o->expose_auth_methods);
 	dump_cfg_fmtint(sFingerprintHash, o->fingerprint_hash);
 
 	/* string arguments */
 	dump_cfg_string(sPidFile, o->pid_file);
 	dump_cfg_string(sXAuthLocation, o->xauth_location);
-	dump_cfg_string(sCiphers, o->ciphers ? o->ciphers : KEX_SERVER_ENCRYPT);
-	dump_cfg_string(sMacs, o->macs ? o->macs : KEX_SERVER_MAC);
-	dump_cfg_string(sBanner, o->banner);
+	dump_cfg_string(sCiphers, o->ciphers ? o->ciphers : FIPS_mode()
+		? KEX_FIPS_ENCRYPT : KEX_SERVER_ENCRYPT);
+	dump_cfg_string(sMacs, o->macs ? o->macs : FIPS_mode()
+		? KEX_FIPS_MAC : KEX_SERVER_MAC);
+	dump_cfg_string(sBanner, o->banner == NULL ? "none" : o->banner);
 	dump_cfg_string(sForceCommand, o->adm_forced_command);
 	dump_cfg_string(sChrootDirectory, o->chroot_directory);
 	dump_cfg_string(sTrustedUserCAKeys, o->trusted_user_ca_keys);
@@ -2297,14 +2413,17 @@ dump_config(ServerOptions *o)
 	dump_cfg_string(sAuthorizedPrincipalsCommand, o->authorized_principals_command);
 	dump_cfg_string(sAuthorizedPrincipalsCommandUser, o->authorized_principals_command_user);
 	dump_cfg_string(sHostKeyAgent, o->host_key_agent);
-	dump_cfg_string(sKexAlgorithms,
-	    o->kex_algorithms ? o->kex_algorithms : KEX_SERVER_KEX);
+	dump_cfg_string(sKexAlgorithms, o->kex_algorithms ? o->kex_algorithms :
+		FIPS_mode() ? KEX_DEFAULT_KEX_FIPS : KEX_SERVER_KEX);
 	dump_cfg_string(sHostbasedAcceptedKeyTypes, o->hostbased_key_types ?
-	    o->hostbased_key_types : KEX_DEFAULT_PK_ALG);
+	    o->hostbased_key_types : (FIPS_mode() ? KEX_FIPS_PK_ALG
+	        : KEX_DEFAULT_PK_ALG));
 	dump_cfg_string(sHostKeyAlgorithms, o->hostkeyalgorithms ?
-	    o->hostkeyalgorithms : KEX_DEFAULT_PK_ALG);
+	    o->hostkeyalgorithms : (FIPS_mode() ? KEX_FIPS_PK_ALG
+	        : KEX_DEFAULT_PK_ALG));
 	dump_cfg_string(sPubkeyAcceptedKeyTypes, o->pubkey_key_types ?
-	    o->pubkey_key_types : KEX_DEFAULT_PK_ALG);
+	    o->pubkey_key_types : (FIPS_mode() ? KEX_FIPS_PK_ALG
+	        : KEX_DEFAULT_PK_ALG));
 
 	/* string arguments requiring a lookup */
 	dump_cfg_string(sLogLevel, log_level_name(o->log_level));

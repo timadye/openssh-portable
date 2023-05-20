@@ -152,8 +152,8 @@ static int all_opens_permitted = 0;
 
 /* -- X11 forwarding */
 
-/* Maximum number of fake X11 displays to try. */
-#define MAX_DISPLAYS  1000
+/* Minimum port number for X11 forwarding */
+#define X11_PORT_MIN 6000
 
 /* Saved X11 local (client) display. */
 static char *x11_saved_display = NULL;
@@ -266,11 +266,11 @@ channel_register_fds(Channel *c, int rfd, int wfd, int efd,
 	channel_max_fd = MAXIMUM(channel_max_fd, wfd);
 	channel_max_fd = MAXIMUM(channel_max_fd, efd);
 
-	if (rfd != -1)
+	if (rfd >= 0)
 		fcntl(rfd, F_SETFD, FD_CLOEXEC);
-	if (wfd != -1 && wfd != rfd)
+	if (wfd >= 0 && wfd != rfd)
 		fcntl(wfd, F_SETFD, FD_CLOEXEC);
-	if (efd != -1 && efd != rfd && efd != wfd)
+	if (efd >= 0 && efd != rfd && efd != wfd)
 		fcntl(efd, F_SETFD, FD_CLOEXEC);
 
 	c->rfd = rfd;
@@ -288,11 +288,11 @@ channel_register_fds(Channel *c, int rfd, int wfd, int efd,
 
 	/* enable nonblocking mode */
 	if (nonblock) {
-		if (rfd != -1)
+		if (rfd >= 0)
 			set_nonblock(rfd);
-		if (wfd != -1)
+		if (wfd >= 0)
 			set_nonblock(wfd);
-		if (efd != -1)
+		if (efd >= 0)
 			set_nonblock(efd);
 	}
 }
@@ -4228,7 +4228,8 @@ channel_send_window_changes(void)
  */
 int
 x11_create_display_inet(int x11_display_offset, int x11_use_localhost,
-    int single_connection, u_int *display_numberp, int **chanids)
+    int x11_max_displays, int single_connection, u_int *display_numberp,
+    int **chanids)
 {
 	Channel *nc = NULL;
 	int display_number, sock;
@@ -4240,10 +4241,15 @@ x11_create_display_inet(int x11_display_offset, int x11_use_localhost,
 	if (chanids == NULL)
 		return -1;
 
+	/* Try to bind ports starting at 6000+X11DisplayOffset */
+	x11_max_displays = x11_max_displays + x11_display_offset;
+
 	for (display_number = x11_display_offset;
-	    display_number < MAX_DISPLAYS;
+	    display_number < x11_max_displays;
 	    display_number++) {
-		port = 6000 + display_number;
+		port = X11_PORT_MIN + display_number;
+		if (port < X11_PORT_MIN) /* overflow */
+			break;
 		memset(&hints, 0, sizeof(hints));
 		hints.ai_family = IPv4or6;
 		hints.ai_flags = x11_use_localhost ? 0: AI_PASSIVE;
@@ -4295,7 +4301,7 @@ x11_create_display_inet(int x11_display_offset, int x11_use_localhost,
 		if (num_socks > 0)
 			break;
 	}
-	if (display_number >= MAX_DISPLAYS) {
+	if (display_number >= x11_max_displays || port < X11_PORT_MIN ) {
 		error("Failed to allocate internet-domain X11 display socket.");
 		return -1;
 	}
@@ -4328,21 +4334,24 @@ x11_create_display_inet(int x11_display_offset, int x11_use_localhost,
 }
 
 static int
-connect_local_xsocket_path(const char *pathname)
+connect_local_xsocket_path(const char *pathname, int len)
 {
 	int sock;
 	struct sockaddr_un addr;
 
+	if (len <= 0)
+		return -1;
 	sock = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sock < 0)
 		error("socket: %.100s", strerror(errno));
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
-	strlcpy(addr.sun_path, pathname, sizeof addr.sun_path);
-	if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == 0)
+	if (len > sizeof addr.sun_path)
+		len = sizeof addr.sun_path;
+	memcpy(addr.sun_path, pathname, len);
+	if (connect(sock, (struct sockaddr *)&addr, sizeof addr - (sizeof addr.sun_path - len) ) == 0)
 		return sock;
 	close(sock);
-	error("connect %.100s: %.100s", addr.sun_path, strerror(errno));
 	return -1;
 }
 
@@ -4350,8 +4359,18 @@ static int
 connect_local_xsocket(u_int dnr)
 {
 	char buf[1024];
-	snprintf(buf, sizeof buf, _PATH_UNIX_X, dnr);
-	return connect_local_xsocket_path(buf);
+	int len, ret;
+	len = snprintf(buf + 1, sizeof (buf) - 1, _PATH_UNIX_X, dnr);
+#ifdef linux
+	/* try abstract socket first */
+	buf[0] = '\0';
+	if ((ret = connect_local_xsocket_path(buf, len + 1)) >= 0)
+		return ret;
+#endif
+	if ((ret = connect_local_xsocket_path(buf + 1, len)) >= 0)
+		return ret;
+	error("connect %.100s: %.100s", buf + 1, strerror(errno));
+	return -1;
 }
 
 int
@@ -4428,7 +4447,7 @@ x11_connect_display(void)
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = IPv4or6;
 	hints.ai_socktype = SOCK_STREAM;
-	snprintf(strport, sizeof strport, "%u", 6000 + display_number);
+	snprintf(strport, sizeof strport, "%u", X11_PORT_MIN + display_number);
 	if ((gaierr = getaddrinfo(buf, strport, &hints, &aitop)) != 0) {
 		error("%.100s: unknown host. (%s)", buf,
 		ssh_gai_strerror(gaierr));
@@ -4444,7 +4463,7 @@ x11_connect_display(void)
 		/* Connect it to the display. */
 		if (connect(sock, ai->ai_addr, ai->ai_addrlen) < 0) {
 			debug2("connect %.100s port %u: %.100s", buf,
-			    6000 + display_number, strerror(errno));
+			    X11_PORT_MIN + display_number, strerror(errno));
 			close(sock);
 			continue;
 		}
@@ -4453,8 +4472,8 @@ x11_connect_display(void)
 	}
 	freeaddrinfo(aitop);
 	if (!ai) {
-		error("connect %.100s port %u: %.100s", buf, 6000 + display_number,
-		    strerror(errno));
+		error("connect %.100s port %u: %.100s", buf,
+		    X11_PORT_MIN + display_number, strerror(errno));
 		return -1;
 	}
 	set_nodelay(sock);

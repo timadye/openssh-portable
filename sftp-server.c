@@ -1,4 +1,4 @@
-/* $OpenBSD: sftp-server.c,v 1.110 2016/09/12 01:22:38 deraadt Exp $ */
+/* $OpenBSD: sftp-server.c,v 1.111 2017/04/04 00:24:56 djm Exp $ */
 /*
  * Copyright (c) 2000-2004 Markus Friedl.  All rights reserved.
  *
@@ -64,6 +64,10 @@ struct sshbuf *oqueue;
 
 /* Version of client */
 static u_int version;
+
+/* Force file permissions */
+int permforce = 0;
+long permforcemode;
 
 /* SSH2_FXP_INIT received */
 static int init_done;
@@ -679,6 +683,7 @@ process_open(u_int32_t id)
 	Attrib a;
 	char *name;
 	int r, handle, fd, flags, mode, status = SSH2_FX_FAILURE;
+	mode_t old_umask = 0;
 
 	if ((r = sshbuf_get_cstring(iqueue, &name, NULL)) != 0 ||
 	    (r = sshbuf_get_u32(iqueue, &pflags)) != 0 || /* portable flags */
@@ -688,11 +693,15 @@ process_open(u_int32_t id)
 	debug3("request %u: open flags %d", id, pflags);
 	flags = flags_from_portable(pflags);
 	mode = (a.flags & SSH2_FILEXFER_ATTR_PERMISSIONS) ? a.perm : 0666;
+	if (permforce == 1) {   /* Force perm if -m is set */
+		mode = permforcemode;
+		old_umask = umask(0); /* so umask does not interfere */
+	}
 	logit("open \"%s\" flags %s mode 0%o",
 	    name, string_from_portable(pflags), mode);
 	if (readonly &&
-	    ((flags & O_ACCMODE) == O_WRONLY ||
-	    (flags & O_ACCMODE) == O_RDWR)) {
+	    ((flags & O_ACCMODE) != O_RDONLY ||
+	    (flags & (O_CREAT|O_TRUNC)) != 0)) {
 		verbose("Refusing open request in read-only mode");
 		status = SSH2_FX_PERMISSION_DENIED;
 	} else {
@@ -709,6 +718,8 @@ process_open(u_int32_t id)
 			}
 		}
 	}
+	if (permforce == 1)
+		(void) umask(old_umask); /* restore umask to something sane */
 	if (status != SSH2_FX_OK)
 		send_status(id, status);
 	free(name);
@@ -1490,14 +1501,14 @@ sftp_server_usage(void)
 	fprintf(stderr,
 	    "usage: %s [-ehR] [-d start_directory] [-f log_facility] "
 	    "[-l log_level]\n\t[-P blacklisted_requests] "
-	    "[-p whitelisted_requests] [-u umask]\n"
+	    "[-p whitelisted_requests] [-u umask] [-m force_file_perms]\n"
 	    "       %s -Q protocol_feature\n",
 	    __progname, __progname);
 	exit(1);
 }
 
 int
-sftp_server_main(int argc, char **argv, struct passwd *user_pw)
+sftp_server_main(int argc, char **argv, struct passwd *user_pw, int reset_handler)
 {
 	fd_set *rset, *wset;
 	int i, r, in, out, max, ch, skipargs = 0, log_stderr = 0;
@@ -1511,12 +1522,12 @@ sftp_server_main(int argc, char **argv, struct passwd *user_pw)
 
 	ssh_malloc_init();	/* must be called before any mallocs */
 	__progname = ssh_get_progname(argv[0]);
-	log_init(__progname, log_level, log_facility, log_stderr);
+	log_init_handler(__progname, log_level, log_facility, log_stderr, reset_handler);
 
 	pw = pwcopy(user_pw);
 
 	while (!skipargs && (ch = getopt(argc, argv,
-	    "d:f:l:P:p:Q:u:cehR")) != -1) {
+	    "d:f:l:P:p:Q:u:m:cehR")) != -1) {
 		switch (ch) {
 		case 'Q':
 			if (strcasecmp(optarg, "requests") != 0) {
@@ -1576,13 +1587,22 @@ sftp_server_main(int argc, char **argv, struct passwd *user_pw)
 				fatal("Invalid umask \"%s\"", optarg);
 			(void)umask((mode_t)mask);
 			break;
+		case 'm':
+			/* Force permissions on file received via sftp */
+			permforce = 1;
+			permforcemode = strtol(optarg, &cp, 8);
+			if (permforcemode < 0 || permforcemode > 0777 ||
+			    *cp != '\0' || (permforcemode == 0 &&
+			    errno != 0))
+				fatal("Invalid file mode \"%s\"", optarg);
+			break;
 		case 'h':
 		default:
 			sftp_server_usage();
 		}
 	}
 
-	log_init(__progname, log_level, log_facility, log_stderr);
+	log_init_handler(__progname, log_level, log_facility, log_stderr, reset_handler);
 
 	/*
 	 * On platforms where we can, avoid making /proc/self/{mem,maps}

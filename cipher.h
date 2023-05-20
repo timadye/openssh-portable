@@ -62,7 +62,25 @@
 #define CIPHER_ENCRYPT		1
 #define CIPHER_DECRYPT		0
 
-struct sshcipher;
+struct sshcipher { /* from cipher.c */
+	char	*name;
+	int	number;		/* for ssh1 only */
+	u_int	block_size;
+	u_int	key_len;
+	u_int	iv_len;		/* defaults to block_size */
+	u_int	auth_len;
+	u_int	discard_len;
+	u_int	flags;
+#define CFLAG_CBC		(1<<0)
+#define CFLAG_CHACHAPOLY	(1<<1)
+#define CFLAG_AESCTR		(1<<2)
+#define CFLAG_NONE		(1<<3)
+#ifdef WITH_OPENSSL
+	const EVP_CIPHER	*(*evptype)(void);
+#else
+	void	*ignored;
+#endif
+};
 struct sshcipher_ctx;
 
 u_int	 cipher_mask_ssh1(int);

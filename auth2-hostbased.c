@@ -60,16 +60,12 @@ userauth_hostbased(Authctxt *authctxt)
 {
 	Buffer b;
 	Key *key = NULL;
-	char *pkalg, *cuser, *chost, *service;
+	char *pkalg, *cuser, *chost, *service, *pubkey;
 	u_char *pkblob, *sig;
 	u_int alen, blen, slen;
 	int pktype;
 	int authenticated = 0;
 
-	if (!authctxt->valid) {
-		debug2("userauth_hostbased: disabled because of invalid user");
-		return 0;
-	}
 	pkalg = packet_get_string(&alen);
 	pkblob = packet_get_string(&blen);
 	chost = packet_get_string(NULL);
@@ -115,13 +111,26 @@ userauth_hostbased(Authctxt *authctxt)
 		goto done;
 	}
 
+	if (!authctxt->valid || authctxt->user == NULL) {
+		debug2("%s: disabled because of invalid user", __func__);
+		goto done;
+	}
+
 	service = datafellows & SSH_BUG_HBSERVICE ? "ssh-userauth" :
 	    authctxt->service;
 	buffer_init(&b);
 	buffer_put_string(&b, session_id2, session_id2_len);
 	/* reconstruct packet */
 	buffer_put_char(&b, SSH2_MSG_USERAUTH_REQUEST);
-	buffer_put_cstring(&b, authctxt->user);
+#ifdef WITH_SELINUX
+	if (authctxt->role) {
+		buffer_put_int(&b, strlen(authctxt->user)+strlen(authctxt->role)+1);
+		buffer_append(&b, authctxt->user, strlen(authctxt->user));
+		buffer_put_char(&b, '/');
+		buffer_append(&b, authctxt->role, strlen(authctxt->role));
+	} else 
+#endif
+		buffer_put_cstring(&b, authctxt->user);
 	buffer_put_cstring(&b, service);
 	buffer_put_cstring(&b, "hostbased");
 	buffer_put_string(&b, pkalg, alen);
@@ -132,15 +141,21 @@ userauth_hostbased(Authctxt *authctxt)
 	buffer_dump(&b);
 #endif
 
-	pubkey_auth_info(authctxt, key,
-	    "client user \"%.100s\", client host \"%.100s\"", cuser, chost);
+	pubkey = sshkey_format_oneline(key, options.fingerprint_hash);
+	auth_info(authctxt,
+	    "%s, client user \"%.100s\", client host \"%.100s\"",
+	    pubkey, cuser, chost);
 
 	/* test for allowed key and correct signature */
 	authenticated = 0;
 	if (PRIVSEP(hostbased_key_allowed(authctxt->pw, cuser, chost, key)) &&
-	    PRIVSEP(key_verify(key, sig, slen, buffer_ptr(&b),
-			buffer_len(&b))) == 1)
+	    PRIVSEP(hostbased_key_verify(key, sig, slen, buffer_ptr(&b),
+			buffer_len(&b))) == 1) {
 		authenticated = 1;
+		authctxt->last_details = pubkey;
+	} else {
+		free(pubkey);
+	}
 
 	buffer_free(&b);
 done:
@@ -153,6 +168,18 @@ done:
 	free(chost);
 	free(sig);
 	return authenticated;
+}
+
+int
+hostbased_key_verify(const Key *key, const u_char *sig, u_int slen, const u_char *data, u_int datalen)
+{
+	int rv;
+
+	rv = key_verify(key, sig, slen, data, datalen);
+#ifdef SSH_AUDIT_EVENTS
+	audit_key(0, &rv, key);
+#endif
+	return rv;
 }
 
 /* return 1 if given hostkey is allowed */

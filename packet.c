@@ -67,6 +67,7 @@
 #include "key.h"	/* typedefs XXX */
 
 #include "xmalloc.h"
+#include "audit.h"
 #include "crc32.h"
 #include "deattack.h"
 #include "compat.h"
@@ -414,6 +415,8 @@ ssh_packet_connection_is_on_socket(struct ssh *ssh)
 	struct sockaddr_storage from, to;
 	socklen_t fromlen, tolen;
 
+	if (!state)
+		return 0;
 	if (state->connection_in == -1 || state->connection_out == -1)
 		return 0;
 
@@ -492,6 +495,13 @@ ssh_packet_get_connection_out(struct ssh *ssh)
 	return ssh->state->connection_out;
 }
 
+static int
+packet_state_has_keys (const struct session_state *state)
+{
+	return state != NULL &&
+		(state->newkeys[MODE_IN] != NULL || state->newkeys[MODE_OUT] != NULL);
+}
+
 /*
  * Returns the IP-address of the remote host as a string.  The returned
  * string must not be freed.
@@ -500,11 +510,12 @@ ssh_packet_get_connection_out(struct ssh *ssh)
 const char *
 ssh_remote_ipaddr(struct ssh *ssh)
 {
-	const int sock = ssh->state->connection_in;
+	int sock;
 
 	/* Check whether we have cached the ipaddr. */
 	if (ssh->remote_ipaddr == NULL) {
 		if (ssh_packet_connection_is_on_socket(ssh)) {
+			sock = ssh->state->connection_in;
 			ssh->remote_ipaddr = get_peer_ipaddr(sock);
 			ssh->remote_port = get_peer_port(sock);
 			ssh->local_ipaddr = get_local_ipaddr(sock);
@@ -560,13 +571,6 @@ ssh_packet_close(struct ssh *ssh)
 	if (!state->initialized)
 		return;
 	state->initialized = 0;
-	if (state->connection_in == state->connection_out) {
-		shutdown(state->connection_out, SHUT_RDWR);
-		close(state->connection_out);
-	} else {
-		close(state->connection_in);
-		close(state->connection_out);
-	}
 	sshbuf_free(state->input);
 	sshbuf_free(state->output);
 	sshbuf_free(state->outgoing_packet);
@@ -598,11 +602,21 @@ ssh_packet_close(struct ssh *ssh)
 				inflateEnd(stream);
 		}
 	}
-	cipher_free(state->send_context);
-	cipher_free(state->receive_context);
+	if (packet_state_has_keys(state)) {
+		cipher_free(state->send_context);
+		cipher_free(state->receive_context);
+		audit_session_key_free(MODE_MAX);
+	}
 	state->send_context = state->receive_context = NULL;
 	free(ssh->remote_ipaddr);
 	ssh->remote_ipaddr = NULL;
+	if (state->connection_in == state->connection_out) {
+		shutdown(state->connection_out, SHUT_RDWR);
+		close(state->connection_out);
+	} else {
+		close(state->connection_in);
+		close(state->connection_out);
+	}
 	free(ssh->state);
 	ssh->state = NULL;
 }
@@ -948,6 +962,7 @@ ssh_set_newkeys(struct ssh *ssh, int mode)
 		    " (%llu bytes total)", __func__,
 		    (unsigned long long)ps->blocks, dir,
 		    (unsigned long long)ps->bytes);
+		audit_session_key_free(mode);
 		cipher_free(*ccp);
 		*ccp = NULL;
 		enc  = &state->newkeys[mode]->enc;
@@ -1829,11 +1844,11 @@ ssh_packet_read_poll2(struct ssh *ssh, u_char *typep, u_int32_t *seqnr_p)
 			if (r != SSH_ERR_MAC_INVALID)
 				goto out;
 			logit("Corrupted MAC on input.");
-			if (need > PACKET_MAX_SIZE)
+			if (need + block_size > PACKET_MAX_SIZE)
 				return SSH_ERR_INTERNAL_ERROR;
 			return ssh_packet_start_discard(ssh, enc, mac,
 			    sshbuf_len(state->incoming_packet),
-			    PACKET_MAX_SIZE - need);
+			    PACKET_MAX_SIZE - need - block_size);
 		}
 		/* Remove MAC from input buffer */
 		DBG(debug("MAC #%d ok", state->p_read.seqnr));
@@ -2436,6 +2451,72 @@ void *
 ssh_packet_get_output(struct ssh *ssh)
 {
 	return (void *)ssh->state->output;
+}
+
+static void
+newkeys_destroy_and_free(struct newkeys *newkeys)
+{
+	if (newkeys == NULL)
+		return;
+
+	free(newkeys->enc.name);
+
+	if (newkeys->mac.enabled) {
+		mac_clear(&newkeys->mac);
+		free(newkeys->mac.name);
+	}
+
+	free(newkeys->comp.name);
+
+	newkeys_destroy(newkeys);
+	free(newkeys);
+}
+
+static void
+packet_destroy_state(struct session_state *state)
+{
+	if (state == NULL)
+		return;
+
+	cipher_free(state->receive_context);
+	cipher_free(state->send_context);
+
+	buffer_free(state->input);
+	state->input = NULL;
+	buffer_free(state->output);
+	state->output = NULL;
+	buffer_free(state->outgoing_packet);
+	state->outgoing_packet = NULL;
+	buffer_free(state->incoming_packet);
+	state->incoming_packet = NULL;
+	if( state->compression_buffer ) {
+		buffer_free(state->compression_buffer);
+		state->compression_buffer = NULL;
+	}
+	newkeys_destroy_and_free(state->newkeys[MODE_IN]);
+	state->newkeys[MODE_IN] = NULL;
+	newkeys_destroy_and_free(state->newkeys[MODE_OUT]);
+	state->newkeys[MODE_OUT] = NULL;
+	mac_destroy(state->packet_discard_mac);
+//	TAILQ_HEAD(, packet) outgoing;
+//	memset(state, 0, sizeof(state));
+}
+
+void
+packet_destroy_all(int audit_it, int privsep)
+{
+	if (audit_it)
+		audit_it = (active_state != NULL && packet_state_has_keys(active_state->state));
+	if (active_state != NULL)
+		packet_destroy_state(active_state->state);
+	if (audit_it) {
+#ifdef SSH_AUDIT_EVENTS
+		if (privsep)
+			audit_session_key_free(MODE_MAX);
+		else
+			audit_session_key_free_body(MODE_MAX, getpid(), getuid());
+#endif
+	}
 }
 
 /* Reset after_authentication and reset compression in post-auth privsep */

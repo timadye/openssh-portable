@@ -39,6 +39,8 @@
 
 #include <sys/types.h>
 
+#include <openssl/fips.h>
+
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -64,26 +66,6 @@ struct sshcipher_ctx {
 	struct chachapoly_ctx cp_ctx; /* XXX union with evp? */
 	struct aesctr_ctx ac_ctx; /* XXX union with evp? */
 	const struct sshcipher *cipher;
-};
-
-struct sshcipher {
-	char	*name;
-	int	number;		/* for ssh1 only */
-	u_int	block_size;
-	u_int	key_len;
-	u_int	iv_len;		/* defaults to block_size */
-	u_int	auth_len;
-	u_int	discard_len;
-	u_int	flags;
-#define CFLAG_CBC		(1<<0)
-#define CFLAG_CHACHAPOLY	(1<<1)
-#define CFLAG_AESCTR		(1<<2)
-#define CFLAG_NONE		(1<<3)
-#ifdef WITH_OPENSSL
-	const EVP_CIPHER	*(*evptype)(void);
-#else
-	void	*ignored;
-#endif
 };
 
 static const struct sshcipher ciphers[] = {
@@ -136,6 +118,24 @@ static const struct sshcipher ciphers[] = {
 	{ NULL,		SSH_CIPHER_INVALID, 0, 0, 0, 0, 0, 0, NULL }
 };
 
+static const struct sshcipher fips_ciphers[] = {
+	{ "none",	SSH_CIPHER_NONE, 8, 0, 0, 0, 0, 0, EVP_enc_null },
+	{ "3des-cbc",	SSH_CIPHER_SSH2, 8, 24, 0, 0, 0, 1, EVP_des_ede3_cbc },
+	{ "aes128-cbc",	SSH_CIPHER_SSH2, 16, 16, 0, 0, 0, 1, EVP_aes_128_cbc },
+	{ "aes192-cbc",	SSH_CIPHER_SSH2, 16, 24, 0, 0, 0, 1, EVP_aes_192_cbc },
+	{ "aes256-cbc",	SSH_CIPHER_SSH2, 16, 32, 0, 0, 0, 1, EVP_aes_256_cbc },
+	{ "rijndael-cbc@lysator.liu.se",
+			SSH_CIPHER_SSH2, 16, 32, 0, 0, 0, 1, EVP_aes_256_cbc },
+	{ "aes128-ctr",	SSH_CIPHER_SSH2, 16, 16, 0, 0, 0, 0, EVP_aes_128_ctr },
+	{ "aes192-ctr",	SSH_CIPHER_SSH2, 16, 24, 0, 0, 0, 0, EVP_aes_192_ctr },
+	{ "aes256-ctr",	SSH_CIPHER_SSH2, 16, 32, 0, 0, 0, 0, EVP_aes_256_ctr },
+	{ "aes128-gcm@openssh.com",
+			SSH_CIPHER_SSH2, 16, 16, 12, 16, 0, 0, EVP_aes_128_gcm },
+	{ "aes256-gcm@openssh.com",
+			SSH_CIPHER_SSH2, 16, 32, 12, 16, 0, 0, EVP_aes_256_gcm },
+	{ NULL,		SSH_CIPHER_INVALID, 0, 0, 0, 0, 0, 0, NULL }
+};
+
 /*--*/
 
 /* Returns a comma-separated list of supported ciphers. */
@@ -146,7 +146,7 @@ cipher_alg_list(char sep, int auth_only)
 	size_t nlen, rlen = 0;
 	const struct sshcipher *c;
 
-	for (c = ciphers; c->name != NULL; c++) {
+	for (c = FIPS_mode() ? fips_ciphers : ciphers; c->name != NULL; c++) {
 		if (c->number != SSH_CIPHER_SSH2)
 			continue;
 		if (auth_only && c->auth_len == 0)
@@ -242,7 +242,7 @@ const struct sshcipher *
 cipher_by_name(const char *name)
 {
 	const struct sshcipher *c;
-	for (c = ciphers; c->name != NULL; c++)
+	for (c = FIPS_mode() ? fips_ciphers : ciphers; c->name != NULL; c++)
 		if (strcmp(c->name, name) == 0)
 			return c;
 	return NULL;
@@ -252,7 +252,7 @@ const struct sshcipher *
 cipher_by_number(int id)
 {
 	const struct sshcipher *c;
-	for (c = ciphers; c->name != NULL; c++)
+	for (c = FIPS_mode() ? fips_ciphers : ciphers; c->name != NULL; c++)
 		if (c->number == id)
 			return c;
 	return NULL;
@@ -293,7 +293,7 @@ cipher_number(const char *name)
 	const struct sshcipher *c;
 	if (name == NULL)
 		return -1;
-	for (c = ciphers; c->name != NULL; c++)
+	for (c = FIPS_mode() ? fips_ciphers : ciphers; c->name != NULL; c++)
 		if (strcasecmp(c->name, name) == 0)
 			return c->number;
 	return -1;

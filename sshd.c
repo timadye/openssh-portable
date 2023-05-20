@@ -66,6 +66,7 @@
 #include <grp.h>
 #include <pwd.h>
 #include <signal.h>
+#include <syslog.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,12 +78,18 @@
 #include <openssl/dh.h>
 #include <openssl/bn.h>
 #include <openssl/rand.h>
+#include <openssl/fips.h>
+#include <fipscheck.h>
 #include "openbsd-compat/openssl-compat.h"
 #endif
 
 #ifdef HAVE_SECUREWARE
 #include <sys/security.h>
 #include <prot.h>
+#endif
+
+#ifdef HAVE_SYSTEMD
+#include <systemd/sd-daemon.h>
 #endif
 
 #include "xmalloc.h"
@@ -119,9 +126,17 @@
 #include "ssh-gss.h"
 #endif
 #include "monitor_wrap.h"
+#include "audit.h"
 #include "ssh-sandbox.h"
 #include "version.h"
 #include "ssherr.h"
+
+#ifdef LIBWRAP
+#include <tcpd.h>
+#include <syslog.h>
+int allow_severity;
+int deny_severity;
+#endif /* LIBWRAP */
 
 /* Re-exec fds */
 #define REEXEC_DEVCRYPTO_RESERVED_FD	(STDERR_FILENO + 1)
@@ -237,7 +252,7 @@ Buffer loginmsg;
 struct passwd *privsep_pw = NULL;
 
 /* Prototypes for various functions defined later in this file. */
-void destroy_sensitive_data(void);
+void destroy_sensitive_data(int);
 void demote_sensitive_data(void);
 static void do_ssh2_kex(void);
 
@@ -252,6 +267,15 @@ close_listen_socks(void)
 	for (i = 0; i < num_listen_socks; i++)
 		close(listen_socks[i]);
 	num_listen_socks = -1;
+}
+
+/*
+ * Is this process listening for clients (i.e. not specific to any specific
+ * client connection?)
+ */
+int listening_for_clients(void)
+{
+	return num_listen_socks >= 0;
 }
 
 static void
@@ -362,14 +386,15 @@ sshd_exchange_identification(struct ssh *ssh, int sock_in, int sock_out)
 {
 	u_int i;
 	int remote_major, remote_minor;
-	char *s, *newline = "\n";
+	char *s;
 	char buf[256];			/* Must not be larger than remote_version. */
 	char remote_version[256];	/* Must be at least as big as buf. */
 
-	xasprintf(&server_version_string, "SSH-%d.%d-%.100s%s%s%s",
-	    PROTOCOL_MAJOR_2, PROTOCOL_MINOR_2, SSH_VERSION,
+	xasprintf(&server_version_string, "SSH-%d.%d-%.100s%s%s\r\n",
+	    PROTOCOL_MAJOR_2, PROTOCOL_MINOR_2,
+	    (options.show_patchlevel == 1) ? SSH_VENDOR_PATCHLEVEL : SSH_VERSION,
 	    *options.version_addendum == '\0' ? "" : " ",
-	    options.version_addendum, newline);
+	    options.version_addendum);
 
 	/* Send our protocol version identification. */
 	if (atomicio(vwrite, sock_out, server_version_string,
@@ -465,18 +490,45 @@ sshd_exchange_identification(struct ssh *ssh, int sock_in, int sock_out)
 	}
 }
 
-/* Destroy the host and server keys.  They will no longer be needed. */
+/*
+ * Destroy the host and server keys.  They will no longer be needed.  Careful,
+ * this can be called from cleanup_exit() - i.e. from just about anywhere.
+ */
 void
-destroy_sensitive_data(void)
+destroy_sensitive_data(int privsep)
 {
 	int i;
+#ifdef SSH_AUDIT_EVENTS
+	pid_t pid;
+	uid_t uid;
 
+	pid = getpid();
+	uid = getuid();
+#endif
 	for (i = 0; i < options.num_host_key_files; i++) {
 		if (sensitive_data.host_keys[i]) {
+			char *fp;
+
+			if (key_is_private(sensitive_data.host_keys[i]))
+				fp = sshkey_fingerprint(sensitive_data.host_keys[i], options.fingerprint_hash, SSH_FP_HEX);
+			else
+				fp = NULL;
 			key_free(sensitive_data.host_keys[i]);
 			sensitive_data.host_keys[i] = NULL;
+			if (fp != NULL) {
+#ifdef SSH_AUDIT_EVENTS
+				if (privsep)
+					PRIVSEP(audit_destroy_sensitive_data(fp,
+						pid, uid));
+				else
+					audit_destroy_sensitive_data(fp,
+						pid, uid);
+#endif
+				free(fp);
+			}
 		}
-		if (sensitive_data.host_certificates[i]) {
+		if (sensitive_data.host_certificates
+		    && sensitive_data.host_certificates[i]) {
 			key_free(sensitive_data.host_certificates[i]);
 			sensitive_data.host_certificates[i] = NULL;
 		}
@@ -489,12 +541,30 @@ demote_sensitive_data(void)
 {
 	Key *tmp;
 	int i;
+#ifdef SSH_AUDIT_EVENTS
+	pid_t pid;
+	uid_t uid;
 
+	pid = getpid();
+	uid = getuid();
+#endif
 	for (i = 0; i < options.num_host_key_files; i++) {
 		if (sensitive_data.host_keys[i]) {
+			char *fp;
+
+			if (key_is_private(sensitive_data.host_keys[i]))
+				fp = sshkey_fingerprint(sensitive_data.host_keys[i], options.fingerprint_hash, SSH_FP_HEX);
+			else
+				fp = NULL;
 			tmp = key_demote(sensitive_data.host_keys[i]);
 			key_free(sensitive_data.host_keys[i]);
 			sensitive_data.host_keys[i] = tmp;
+			if (fp != NULL) {
+#ifdef SSH_AUDIT_EVENTS
+				audit_destroy_sensitive_data(fp, pid, uid);
+#endif
+				free(fp);
+			}
 		}
 		/* Certs do not need demotion */
 	}
@@ -531,7 +601,7 @@ privsep_preauth_child(void)
 
 #ifdef GSSAPI
 	/* Cache supported mechanism OIDs for later use */
-	if (options.gss_authentication)
+	if (options.gss_authentication || options.gss_keyex)
 		ssh_gssapi_prepare_supported_oids();
 #endif
 
@@ -539,6 +609,10 @@ privsep_preauth_child(void)
 
 	/* Demote the private keys to public keys. */
 	demote_sensitive_data();
+
+#ifdef WITH_SELINUX
+	ssh_selinux_change_context("sshd_net_t");
+#endif
 
 	/* Demote the child */
 	if (getuid() == 0 || geteuid() == 0) {
@@ -573,7 +647,7 @@ privsep_preauth(Authctxt *authctxt)
 
 	if (use_privsep == PRIVSEP_ON)
 		box = ssh_sandbox_init(pmonitor);
-	pid = fork();
+	pmonitor->m_pid = pid = fork();
 	if (pid == -1) {
 		fatal("fork of unprivileged child failed");
 	} else if (pid != 0) {
@@ -621,8 +695,10 @@ privsep_preauth(Authctxt *authctxt)
 
 		privsep_preauth_child();
 		setproctitle("%s", "[net]");
-		if (box != NULL)
+		if (box != NULL) {
 			ssh_sandbox_child(box);
+			free(box);
+		}
 
 		return 0;
 	}
@@ -642,7 +718,7 @@ privsep_postauth(Authctxt *authctxt)
 	}
 
 	/* New socket pair */
-	monitor_reinit(pmonitor);
+	monitor_reinit(pmonitor, options.chroot_directory);
 
 	pmonitor->m_pid = fork();
 	if (pmonitor->m_pid == -1)
@@ -650,6 +726,12 @@ privsep_postauth(Authctxt *authctxt)
 	else if (pmonitor->m_pid != 0) {
 		verbose("User child is on pid %ld", (long)pmonitor->m_pid);
 		buffer_clear(&loginmsg);
+		if (*pmonitor->m_pkex != NULL ){
+			newkeys_destroy((*pmonitor->m_pkex)->newkeys[MODE_OUT]);
+			newkeys_destroy((*pmonitor->m_pkex)->newkeys[MODE_IN]);
+			audit_session_key_free_body(2, getpid(), getuid());
+			packet_destroy_all(0, 0);
+		}
 		monitor_child_postauth(pmonitor);
 
 		/* NEVERREACHED */
@@ -660,6 +742,11 @@ privsep_postauth(Authctxt *authctxt)
 
 	close(pmonitor->m_sendfd);
 	pmonitor->m_sendfd = -1;
+	close(pmonitor->m_log_recvfd);
+	pmonitor->m_log_recvfd = -1;
+
+	if (pmonitor->m_log_sendfd != -1)
+		set_log_handler(mm_log_handler, pmonitor);
 
 	/* Demote the private keys to public keys. */
 	demote_sensitive_data();
@@ -670,6 +757,13 @@ privsep_postauth(Authctxt *authctxt)
 	do_setusercontext(authctxt->pw);
 
  skip:
+#ifdef WITH_SELINUX
+	/* switch SELinux content for root too */
+	if (authctxt->pw->pw_uid == 0) {
+		sshd_selinux_copy_context();
+	}
+#endif
+
 	/* It is safe now to apply the key state */
 	monitor_apply_keystate(pmonitor);
 
@@ -864,8 +958,9 @@ notify_hostkeys(struct ssh *ssh)
 	}
 	debug3("%s: sent %d hostkeys", __func__, nkeys);
 	if (nkeys == 0)
-		fatal("%s: no hostkeys", __func__);
-	packet_send();
+		debug3("%s: no hostkeys", __func__);
+	else
+		packet_send();
 	sshbuf_free(buf);
 }
 
@@ -1133,6 +1228,7 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s)
 		if (received_sigterm) {
 			logit("Received signal %d; terminating.",
 			    (int) received_sigterm);
+			destroy_sensitive_data(0);
 			close_listen_socks();
 			if (options.pid_file != NULL)
 				unlink(options.pid_file);
@@ -1300,6 +1396,9 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s)
 		if (num_listen_socks < 0)
 			break;
 	}
+
+	if (fdset != NULL)
+		free(fdset);
 }
 
 /*
@@ -1333,12 +1432,29 @@ check_ip_options(struct ssh *ssh)
 
 	if (getsockopt(sock_in, IPPROTO_IP, IP_OPTIONS, opts,
 	    &option_size) >= 0 && option_size != 0) {
-		text[0] = '\0';
-		for (i = 0; i < option_size; i++)
-			snprintf(text + i*3, sizeof(text) - i*3,
-			    " %2.2x", opts[i]);
-		fatal("Connection from %.100s port %d with IP opts: %.800s",
-		    ssh_remote_ipaddr(ssh), ssh_remote_port(ssh), text);
+		i = 0;
+		do {
+			switch (opts[i]) {
+				case 0:
+				case 1:
+					++i;
+					break;
+				case 130:
+				case 133:
+				case 134:
+					i += opts[i + 1];
+					break;
+				default:
+				/* Fail, fatally, if we detect either loose or strict
+			 	 * source routing options. */
+					text[0] = '\0';
+					for (i = 0; i < option_size; i++)
+						snprintf(text + i*3, sizeof(text) - i*3,
+							" %2.2x", opts[i]);
+					fatal("Connection from %.100s port %d with IP options:%.800s",
+						ssh_remote_ipaddr(ssh), ssh_remote_port(ssh), text);
+			}
+		} while (i < option_size);
 	}
 	return;
 #endif /* IP_OPTIONS */
@@ -1375,6 +1491,18 @@ main(int ac, char **av)
 #endif
 	__progname = ssh_get_progname(av[0]);
 
+        SSLeay_add_all_algorithms();
+	if (access("/etc/system-fips", F_OK) == 0)
+		if (! FIPSCHECK_verify(NULL, NULL)) {
+			openlog(__progname, LOG_PID, LOG_AUTHPRIV);
+			if (FIPS_mode()) {
+				syslog(LOG_CRIT, "FIPS integrity verification test failed.");
+				cleanup_exit(255);
+			}
+			else
+				syslog(LOG_INFO, "FIPS integrity verification test failed.");
+			closelog();
+		}
 	/* Save argv. Duplicate so setproctitle emulation doesn't clobber it */
 	saved_argc = ac;
 	rexec_argc = ac;
@@ -1523,7 +1651,7 @@ main(int ac, char **av)
 	else
 		closefrom(REEXEC_DEVCRYPTO_RESERVED_FD);
 
-#ifdef WITH_OPENSSL
+#if 0 /* FIPS */
 	OpenSSL_add_all_algorithms();
 #endif
 
@@ -1579,6 +1707,10 @@ main(int ac, char **av)
 	parse_server_config(&options, rexeced_flag ? "rexec" : config_file_name,
 	    &cfg, NULL);
 
+	/* 'UsePAM no' is not supported in Red Hat Enterprise Linux */
+	if (! options.use_pam)
+		logit("WARNING: 'UsePAM no' is not supported in Red Hat Enterprise Linux and may cause several problems.");
+
 	seed_rng();
 
 	/* Fill in default values for those options not explicitly set. */
@@ -1626,7 +1758,8 @@ main(int ac, char **av)
 		exit(1);
 	}
 
-	debug("sshd version %s, %s", SSH_VERSION,
+	debug("sshd version %s, %s",
+	    (options.show_patchlevel == 1) ? SSH_VENDOR_PATCHLEVEL : SSH_VERSION,
 #ifdef WITH_OPENSSL
 	    SSLeay_version(SSLEAY_VERSION)
 #else
@@ -1670,6 +1803,15 @@ main(int ac, char **av)
 			continue;
 		key = key_load_private(options.host_key_files[i], "", NULL);
 		pubkey = key_load_public(options.host_key_files[i], NULL);
+
+		if ((pubkey != NULL && pubkey->type == KEY_RSA1) ||
+		    (key != NULL && key->type == KEY_RSA1)) {
+			verbose("Ignoring RSA1 key %s",
+			    options.host_key_files[i]);
+			key_free(key);
+			key_free(pubkey);
+			continue;
+		}
 		if (pubkey == NULL && key != NULL)
 			pubkey = key_demote(key);
 		sensitive_data.host_keys[i] = key;
@@ -1705,7 +1847,8 @@ main(int ac, char **av)
 		    key ? "private" : "agent", i, sshkey_ssh_name(pubkey), fp);
 		free(fp);
 	}
-	if (!sensitive_data.have_ssh2_key) {
+	/* The GSSAPI key exchange can run without a host key */
+	if (!sensitive_data.have_ssh2_key && !options.gss_keyex) {
 		logit("sshd: no hostkeys available -- exiting.");
 		exit(1);
 	}
@@ -1827,6 +1970,10 @@ main(int ac, char **av)
 	/* Reinitialize the log (because of the fork above). */
 	log_init(__progname, options.log_level, options.log_facility, log_stderr);
 
+	if (FIPS_mode()) {
+		logit("FIPS mode initialized");
+	}
+
 	/* Chdir to the root directory so that the current disk can be
 	   unmounted if desired. */
 	if (chdir("/") == -1)
@@ -1862,6 +2009,11 @@ main(int ac, char **av)
 				fclose(f);
 			}
 		}
+
+#ifdef HAVE_SYSTEMD
+	/* Signal systemd that we are ready to accept connections */
+	sd_notify(0, "READY=1");
+#endif
 
 		/* Accept a connection and return in a forked child */
 		server_accept_loop(&sock_in, &sock_out,
@@ -1971,6 +2123,24 @@ main(int ac, char **av)
 #ifdef SSH_AUDIT_EVENTS
 	audit_connection_from(remote_ip, remote_port);
 #endif
+#ifdef LIBWRAP
+	allow_severity = options.log_facility|LOG_INFO;
+	deny_severity = options.log_facility|LOG_WARNING;
+	/* Check whether logins are denied from this host. */
+	if (packet_connection_is_on_socket()) {
+		struct request_info req;
+
+		request_init(&req, RQ_DAEMON, __progname, RQ_FILE, sock_in, 0);
+		fromhost(&req);
+
+		if (!hosts_access(&req)) {
+			debug("Connection refused by tcp wrapper");
+			refuse(&req);
+			/* NOTREACHED */
+			fatal("libwrap refuse returns");
+		}
+	}
+#endif /* LIBWRAP */
 
 	/* Log the connection. */
 	laddr = get_local_ipaddr(sock_in);
@@ -2026,6 +2196,7 @@ main(int ac, char **av)
 	 */
 	if (use_privsep) {
 		mm_send_keystate(pmonitor);
+		packet_destroy_all(1, 1);
 		exit(0);
 	}
 
@@ -2053,6 +2224,9 @@ main(int ac, char **av)
 		restore_uid();
 	}
 #endif
+#ifdef WITH_SELINUX
+	sshd_selinux_setup_exec_context(authctxt->pw->pw_name);
+#endif
 #ifdef USE_PAM
 	if (options.use_pam) {
 		do_pam_setcred(1);
@@ -2079,6 +2253,9 @@ main(int ac, char **av)
 	do_authenticated(authctxt);
 
 	/* The connection has been terminated. */
+	packet_destroy_all(1, 1);
+	destroy_sensitive_data(1);
+
 	packet_get_bytes(&ibytes, &obytes);
 	verbose("Transferred: sent %llu, received %llu bytes",
 	    (unsigned long long)obytes, (unsigned long long)ibytes);
@@ -2159,6 +2336,52 @@ do_ssh2_kex(void)
 	myproposal[PROPOSAL_SERVER_HOST_KEY_ALGS] = compat_pkalg_proposal(
 	    list_hostkey_types());
 
+#ifdef GSSAPI
+	{
+	char *orig;
+	char *gss = NULL;
+	char *newstr = NULL;
+	orig = myproposal[PROPOSAL_KEX_ALGS];
+
+	/* 
+	 * If we don't have a host key, then there's no point advertising
+	 * the other key exchange algorithms
+	 */
+
+	if (strlen(myproposal[PROPOSAL_SERVER_HOST_KEY_ALGS]) == 0)
+		orig = NULL;
+
+	if (options.gss_keyex) {
+		if (FIPS_mode()) {
+			logit("Disabling GSSAPIKeyExchange. Not usable in FIPS mode");
+			options.gss_keyex = 0;
+		} else {
+			gss = ssh_gssapi_server_mechanisms();
+		}
+	}
+
+	if (gss && orig)
+		xasprintf(&newstr, "%s,%s", gss, orig);
+	else if (gss)
+		newstr = gss;
+	else if (orig)
+		newstr = orig;
+
+	/* 
+	 * If we've got GSSAPI mechanisms, then we've got the 'null' host
+	 * key alg, but we can't tell people about it unless its the only
+  	 * host key algorithm we support
+	 */
+	if (gss && (strlen(myproposal[PROPOSAL_SERVER_HOST_KEY_ALGS])) == 0)
+		myproposal[PROPOSAL_SERVER_HOST_KEY_ALGS] = "null";
+
+	if (newstr)
+		myproposal[PROPOSAL_KEX_ALGS] = newstr;
+	else
+		fatal("No supported key exchange algorithms");
+	}
+#endif
+
 	/* start key exchange */
 	if ((r = kex_setup(active_state, myproposal)) != 0)
 		fatal("kex_setup: %s", ssh_err(r));
@@ -2176,6 +2399,13 @@ do_ssh2_kex(void)
 # endif
 #endif
 	kex->kex[KEX_C25519_SHA256] = kexc25519_server;
+#ifdef GSSAPI
+	if (options.gss_keyex) {
+		kex->kex[KEX_GSS_GRP1_SHA1] = kexgss_server;
+		kex->kex[KEX_GSS_GRP14_SHA1] = kexgss_server;
+		kex->kex[KEX_GSS_GEX_SHA1] = kexgss_server;
+	}
+#endif
 	kex->server = 1;
 	kex->client_version_string=client_version_string;
 	kex->server_version_string=server_version_string;
@@ -2203,6 +2433,16 @@ do_ssh2_kex(void)
 void
 cleanup_exit(int i)
 {
+	static int in_cleanup = 0;
+	int is_privsep_child;
+
+	/* cleanup_exit can be called at the very least from the privsep
+	   wrappers used for auditing.  Make sure we don't recurse
+	   indefinitely. */
+	if (in_cleanup)
+		_exit(i);
+	in_cleanup = 1;
+
 	if (the_authctxt) {
 		do_cleanup(the_authctxt);
 		if (use_privsep && privsep_is_preauth &&
@@ -2214,9 +2454,14 @@ cleanup_exit(int i)
 				    pmonitor->m_pid, strerror(errno));
 		}
 	}
+	is_privsep_child = use_privsep && pmonitor != NULL && pmonitor->m_pid == 0;
+	if (sensitive_data.host_keys != NULL)
+		destroy_sensitive_data(is_privsep_child);
+	packet_destroy_all(1, is_privsep_child);
 #ifdef SSH_AUDIT_EVENTS
 	/* done after do_cleanup so it can cancel the PAM auth 'thread' */
-	if (!use_privsep || mm_is_monitor())
+	if ((the_authctxt == NULL || !the_authctxt->authenticated) &&
+	    (!use_privsep || mm_is_monitor()))
 		audit_event(SSH_CONNECTION_ABANDON);
 #endif
 	_exit(i);

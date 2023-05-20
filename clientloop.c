@@ -113,6 +113,10 @@
 #include "ssherr.h"
 #include "hostfile.h"
 
+#ifdef GSSAPI
+#include "ssh-gss.h"
+#endif
+
 /* import options */
 extern Options options;
 
@@ -1664,8 +1668,17 @@ client_loop(int have_pty, int escape_char_arg, int ssh2_chan_id)
 			break;
 
 		/* Do channel operations unless rekeying in progress. */
-		if (!ssh_packet_is_rekeying(active_state))
+		if (!ssh_packet_is_rekeying(active_state)) {
 			channel_after_select(readset, writeset);
+
+#ifdef GSSAPI
+			if (options.gss_renewal_rekey &&
+			    ssh_gssapi_credentials_updated(NULL)) {
+				debug("credentials updated - forcing rekey");
+				need_rekeying = 1;
+			}
+#endif
+		}
 
 		/* Buffer input from the connection.  */
 		client_process_net_input(readset);
@@ -2266,7 +2279,7 @@ update_known_hosts(struct hostkeys_update_ctx *ctx)
 		if (ctx->keys_seen[i] != 2)
 			continue;
 		if ((fp = sshkey_fingerprint(ctx->keys[i],
-		    options.fingerprint_hash, SSH_FP_DEFAULT)) == NULL)
+		    options.fingerprint_hash[0], SSH_FP_DEFAULT)) == NULL)
 			fatal("%s: sshkey_fingerprint failed", __func__);
 		do_log2(loglevel, "Learned new hostkey: %s %s",
 		    sshkey_type(ctx->keys[i]), fp);
@@ -2274,7 +2287,7 @@ update_known_hosts(struct hostkeys_update_ctx *ctx)
 	}
 	for (i = 0; i < ctx->nold; i++) {
 		if ((fp = sshkey_fingerprint(ctx->old_keys[i],
-		    options.fingerprint_hash, SSH_FP_DEFAULT)) == NULL)
+		    options.fingerprint_hash[0], SSH_FP_DEFAULT)) == NULL)
 			fatal("%s: sshkey_fingerprint failed", __func__);
 		do_log2(loglevel, "Deprecating obsolete hostkey: %s %s",
 		    sshkey_type(ctx->old_keys[i]), fp);
@@ -2290,7 +2303,7 @@ update_known_hosts(struct hostkeys_update_ctx *ctx)
 			free(response);
 			response = read_passphrase("Accept updated hostkeys? "
 			    "(yes/no): ", RP_ECHO);
-			if (strcasecmp(response, "yes") == 0)
+			if (response != NULL && strcasecmp(response, "yes") == 0)
 				break;
 			else if (quit_pending || response == NULL ||
 			    strcasecmp(response, "no") == 0) {
@@ -2317,7 +2330,7 @@ update_known_hosts(struct hostkeys_update_ctx *ctx)
 	    (r = hostfile_replace_entries(options.user_hostfiles[0],
 	    ctx->host_str, ctx->ip_str, ctx->keys, ctx->nkeys,
 	    options.hash_known_hosts, 0,
-	    options.fingerprint_hash)) != 0)
+	    options.fingerprint_hash[0])) != 0)
 		error("%s: hostfile_replace_entries failed: %s",
 		    __func__, ssh_err(r));
 }
@@ -2430,7 +2443,7 @@ client_input_hostkeys(void)
 			error("%s: parse key: %s", __func__, ssh_err(r));
 			goto out;
 		}
-		fp = sshkey_fingerprint(key, options.fingerprint_hash,
+		fp = sshkey_fingerprint(key, options.fingerprint_hash[0],
 		    SSH_FP_DEFAULT);
 		debug3("%s: received %s key %s", __func__,
 		    sshkey_type(key), fp);
@@ -2439,7 +2452,7 @@ client_input_hostkeys(void)
 		/* Check that the key is accepted in HostkeyAlgorithms */
 		if (match_pattern_list(sshkey_ssh_name(key),
 		    options.hostkeyalgorithms ? options.hostkeyalgorithms :
-		    KEX_DEFAULT_PK_ALG, 0) != 1) {
+		    (FIPS_mode() ? KEX_FIPS_PK_ALG : KEX_DEFAULT_PK_ALG), 0) != 1) {
 			debug3("%s: %s key not permitted by HostkeyAlgorithms",
 			    __func__, sshkey_ssh_name(key));
 			continue;

@@ -70,6 +70,7 @@ extern Authmethod method_passwd;
 extern Authmethod method_kbdint;
 extern Authmethod method_hostbased;
 #ifdef GSSAPI
+extern Authmethod method_gsskeyex;
 extern Authmethod method_gssapi;
 #endif
 
@@ -77,6 +78,7 @@ Authmethod *authmethods[] = {
 	&method_none,
 	&method_pubkey,
 #ifdef GSSAPI
+	&method_gsskeyex,
 	&method_gssapi,
 #endif
 	&method_passwd,
@@ -215,6 +217,9 @@ input_userauth_request(int type, u_int32_t seq, void *ctxt)
 	Authctxt *authctxt = ctxt;
 	Authmethod *m = NULL;
 	char *user, *service, *method, *style = NULL;
+#ifdef WITH_SELINUX
+	char *role = NULL;
+#endif
 	int authenticated = 0;
 
 	if (authctxt == NULL)
@@ -225,6 +230,11 @@ input_userauth_request(int type, u_int32_t seq, void *ctxt)
 	method = packet_get_cstring(NULL);
 	debug("userauth-request for user %s service %s method %s", user, service, method);
 	debug("attempt %d failures %d", authctxt->attempt, authctxt->failures);
+
+#ifdef WITH_SELINUX
+	if ((role = strchr(user, '/')) != NULL)
+		*role++ = 0;
+#endif
 
 	if ((style = strchr(user, ':')) != NULL)
 		*style++ = 0;
@@ -239,9 +249,6 @@ input_userauth_request(int type, u_int32_t seq, void *ctxt)
 		} else {
 			logit("input_userauth_request: invalid user %s", user);
 			authctxt->pw = fakepw();
-#ifdef SSH_AUDIT_EVENTS
-			PRIVSEP(audit_event(SSH_INVALID_USER));
-#endif
 		}
 #ifdef USE_PAM
 		if (options.use_pam)
@@ -251,8 +258,15 @@ input_userauth_request(int type, u_int32_t seq, void *ctxt)
 		    use_privsep ? " [net]" : "");
 		authctxt->service = xstrdup(service);
 		authctxt->style = style ? xstrdup(style) : NULL;
-		if (use_privsep)
+#ifdef WITH_SELINUX
+		authctxt->role = role ? xstrdup(role) : NULL;
+#endif
+		if (use_privsep) {
 			mm_inform_authserv(service, style);
+#ifdef WITH_SELINUX
+			mm_inform_authrole(role);
+#endif
+		}
 		userauth_banner();
 		if (auth2_setup_methods_lists(authctxt) != 0)
 			packet_disconnect("no authentication methods enabled");
@@ -293,6 +307,7 @@ userauth_finish(Authctxt *authctxt, int authenticated, const char *method,
     const char *submethod)
 {
 	char *methods;
+	char *prev_auth_details;
 	int partial = 0;
 
 	if (!authctxt->valid && authenticated)
@@ -322,6 +337,18 @@ userauth_finish(Authctxt *authctxt, int authenticated, const char *method,
 
 	if (authctxt->postponed)
 		return;
+
+	if (authenticated || partial) {
+		prev_auth_details = authctxt->auth_details;
+		xasprintf(&authctxt->auth_details, "%s%s%s%s%s",
+		    prev_auth_details ? prev_auth_details : "",
+		    prev_auth_details ? ", " : "", method,
+		    authctxt->last_details ? ": " : "",
+		    authctxt->last_details ? authctxt->last_details : "");
+		free(prev_auth_details);
+	}
+	free(authctxt->last_details);
+	authctxt->last_details = NULL;
 
 #ifdef USE_PAM
 	if (options.use_pam && authenticated) {

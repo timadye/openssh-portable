@@ -62,6 +62,7 @@ enum sshkey_types {
 	KEY_DSA_CERT,
 	KEY_ECDSA_CERT,
 	KEY_ED25519_CERT,
+	KEY_NULL,
 	KEY_UNSPEC
 };
 
@@ -123,6 +124,7 @@ char		*sshkey_fingerprint(const struct sshkey *,
     int, enum sshkey_fp_rep);
 int		 sshkey_fingerprint_raw(const struct sshkey *k,
     int, u_char **retp, size_t *lenp);
+char		*sshkey_format_oneline(const struct sshkey *k, int dgst_alg);
 const char	*sshkey_type(const struct sshkey *);
 const char	*sshkey_cert_type(const struct sshkey *);
 int		 sshkey_write(const struct sshkey *, FILE *);
@@ -132,6 +134,7 @@ u_int		 sshkey_size(const struct sshkey *);
 int		 sshkey_generate(int type, u_int bits, struct sshkey **keyp);
 int		 sshkey_from_private(const struct sshkey *, struct sshkey **);
 int	 sshkey_type_from_name(const char *);
+int	 sshkey_is_private(const struct sshkey *);
 int	 sshkey_is_cert(const struct sshkey *);
 int	 sshkey_type_is_cert(int);
 int	 sshkey_type_plain(int);

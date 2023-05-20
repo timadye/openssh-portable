@@ -118,6 +118,8 @@ The allow/deny directives are processed in the following order:
 .Cm DenyGroups ,
 and finally
 .Cm AllowGroups .
+All of the specified user and group tests must succeed, before user
+is allowed to log in.
 .Pp
 See PATTERNS in
 .Xr ssh_config 5
@@ -178,6 +180,8 @@ The allow/deny directives are processed in the following order:
 .Cm DenyGroups ,
 and finally
 .Cm AllowGroups .
+All of the specified user and group tests must succeed, before user
+is allowed to log in.
 .Pp
 See PATTERNS in
 .Xr ssh_config 5
@@ -477,7 +481,9 @@ The default is:
 .Bd -literal -offset indent
 chacha20-poly1305@openssh.com,
 aes128-ctr,aes192-ctr,aes256-ctr,
-aes128-gcm@openssh.com,aes256-gcm@openssh.com
+aes128-gcm@openssh.com,aes256-gcm@openssh.com,
+aes128-cbc,aes192-cbc,aes256-cbc,
+blowfish-cbc,cast128-cbc,3des-cbc
 .Ed
 .Pp
 The list of available ciphers may also be obtained using
@@ -539,6 +545,8 @@ The allow/deny directives are processed in the following order:
 .Cm DenyGroups ,
 and finally
 .Cm AllowGroups .
+All of the specified user and group tests must succeed, before user
+is allowed to log in.
 .Pp
 See PATTERNS in
 .Xr ssh_config 5
@@ -560,6 +568,8 @@ The allow/deny directives are processed in the following order:
 .Cm DenyGroups ,
 and finally
 .Cm AllowGroups .
+All of the specified user and group tests must succeed, before user
+is allowed to log in.
 .Pp
 See PATTERNS in
 .Xr ssh_config 5
@@ -570,6 +580,21 @@ Disables all forwarding features, including X11,
 TCP and StreamLocal.
 This option overrides all other forwarding-related options and may
 simplify restricted configurations.
+.It Cm ExposeAuthenticationMethods
+When using SSH2, this option controls the exposure of the list of
+successful authentication methods to PAM during the authentication
+and to the shell environment via the
+.Cm SSH_USER_AUTH
+variable. See the description of this variable for more details.
+Valid options are:
+.Cm never
+(Do not expose successful authentication methods),
+.Cm pam-only
+(Only expose them to PAM during authentication, not afterwards),
+.Cm pam-and-env
+(Expose them to PAM and keep them in the shell environment).
+The default is
+.Cm never .
 .It Cm FingerprintHash
 Specifies the hash algorithm used when logging key fingerprints.
 Valid options are:
@@ -628,6 +653,17 @@ Specifies whether to automatically destroy the user's credentials cache
 on logout.
 The default is
 .Cm yes .
+.It Cm GSSAPIKeyExchange
+Specifies whether key exchange based on GSSAPI is allowed. GSSAPI key exchange
+doesn't rely on ssh keys to verify host identity.
+The default is
+.Dq no .
+.It Cm GSSAPIEnablek5users
+Specifies whether to look at .k5users file for GSSAPI authentication
+access control. Further details are described in
+.Xr ksu 1 .
+The default is
+.Cm no .
 .It Cm GSSAPIStrictAcceptorCheck
 Determines whether to be strict about the identity of the GSSAPI acceptor
 a client authenticates against.
@@ -642,6 +678,23 @@ machine's default store.
 This facility is provided to assist with operation on multi homed machines.
 The default is
 .Cm yes .
+.It Cm GSSAPIStoreCredentialsOnRekey
+Controls whether the user's GSSAPI credentials should be updated following a 
+successful connection rekeying. This option can be used to accepted renewed 
+or updated credentials from a compatible client. The default is
+.Dq no .
+.It Cm GSSAPIKexAlgorithms
+The list of key exchange algorithms that are accepted by GSSAPI
+key exchange. Possible values are
+.Bd -literal -offset 3n
+gss-gex-sha1-,
+gss-group1-sha1-,
+gss-group14-sha1-
+.Ed
+.Pp
+The default is
+.Dq gss-gex-sha1-,gss-group1-sha1-,gss-group14-sha1- .
+This option only applies to protocol version 2 connections using GSSAPI.
 .It Cm HostbasedAcceptedKeyTypes
 Specifies the key types that will be accepted for hostbased authentication
 as a comma-separated pattern list.
@@ -656,8 +709,9 @@ ecdsa-sha2-nistp384-cert-v01@openssh.com,
 ecdsa-sha2-nistp521-cert-v01@openssh.com,
 ssh-ed25519-cert-v01@openssh.com,
 ssh-rsa-cert-v01@openssh.com,
+ssh-dss-cert-v01@openssh.com,
 ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,
-ssh-ed25519,ssh-rsa
+ssh-ed25519,ssh-rsa,ssh-dss
 .Ed
 .Pp
 The list of available key types may also be obtained using
@@ -734,8 +788,9 @@ ecdsa-sha2-nistp384-cert-v01@openssh.com,
 ecdsa-sha2-nistp521-cert-v01@openssh.com,
 ssh-ed25519-cert-v01@openssh.com,
 ssh-rsa-cert-v01@openssh.com,
+ssh-dss-cert-v01@openssh.com,
 ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,
-ssh-ed25519,ssh-rsa
+ssh-ed25519,ssh-rsa,ssh-dss
 .Ed
 .Pp
 The list of available key types may also be obtained using
@@ -836,6 +891,10 @@ Specifies whether to automatically destroy the user's ticket cache
 file on logout.
 The default is
 .Cm yes .
+.It Cm KerberosUseKuserok
+Specifies whether to look at .k5login file for user's aliases.
+The default is
+.Cm yes .
 .It Cm KexAlgorithms
 Specifies the available KEX (Key Exchange) algorithms.
 Multiple algorithms must be comma-separated.
@@ -871,7 +930,8 @@ The default is:
 curve25519-sha256,curve25519-sha256@libssh.org,
 ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,
 diffie-hellman-group-exchange-sha256,
-diffie-hellman-group14-sha1
+diffie-hellman-group14-sha1,
+diffie-hellman-group1-sha1
 .Ed
 .Pp
 The list of available key exchange algorithms may also be obtained using
@@ -985,7 +1045,8 @@ umac-64-etm@openssh.com,umac-128-etm@openssh.com,
 hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,
 hmac-sha1-etm@openssh.com,
 umac-64@openssh.com,umac-128@openssh.com,
-hmac-sha2-256,hmac-sha2-512,hmac-sha1
+hmac-sha2-256,hmac-sha2-512,hmac-sha1,
+hmac-sha1-etm@openssh.com
 .Ed
 .Pp
 The list of available MAC algorithms may also be obtained using
@@ -1064,6 +1125,7 @@ Available keywords are
 .Cm IPQoS ,
 .Cm KbdInteractiveAuthentication ,
 .Cm KerberosAuthentication ,
+.Cm KerberosUseKuserok ,
 .Cm MaxAuthTries ,
 .Cm MaxSessions ,
 .Cm PasswordAuthentication ,
@@ -1081,6 +1143,7 @@ Available keywords are
 .Cm StreamLocalBindUnlink ,
 .Cm TrustedUserCAKeys ,
 .Cm X11DisplayOffset ,
+.Cm X11MaxDisplays ,
 .Cm X11Forwarding
 and
 .Cm X11UseLocalHost .
@@ -1170,7 +1233,7 @@ The argument must be
 or
 .Cm no .
 The default is
-.Cm prohibit-password .
+.Cm yes .
 .Pp
 If this option is set to
 .Cm prohibit-password
@@ -1287,8 +1350,9 @@ ecdsa-sha2-nistp384-cert-v01@openssh.com,
 ecdsa-sha2-nistp521-cert-v01@openssh.com,
 ssh-ed25519-cert-v01@openssh.com,
 ssh-rsa-cert-v01@openssh.com,
+ssh-dss-cert-v01@openssh.com,
 ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,
-ssh-ed25519,ssh-rsa
+ssh-ed25519,ssh-rsa,ssh-dss
 .Ed
 .Pp
 The list of available key types may also be obtained using
@@ -1334,6 +1398,14 @@ an OpenSSH Key Revocation List (KRL) as generated by
 .Xr ssh-keygen 1 .
 For more information on KRLs, see the KEY REVOCATION LISTS section in
 .Xr ssh-keygen 1 .
+.It Cm ShowPatchLevel 
+Specifies whether 
+.Nm sshd 
+will display the patch level of the binary in the identification string. 
+The patch level is set at compile-time. 
+The default is 
+.Dq no . 
+This option applies to protocol version 1 only. 
 .It Cm StreamLocalBindMask
 Sets the octal file creation mode mask
 .Pq umask
@@ -1393,7 +1465,7 @@ By default no subsystems are defined.
 .It Cm SyslogFacility
 Gives the facility code that is used when logging messages from
 .Xr sshd 8 .
-The possible values are: DAEMON, USER, AUTH, LOCAL0, LOCAL1, LOCAL2,
+The possible values are: DAEMON, USER, AUTH, AUTHPRIV, LOCAL0, LOCAL1, LOCAL2,
 LOCAL3, LOCAL4, LOCAL5, LOCAL6, LOCAL7.
 The default is AUTH.
 .It Cm TCPKeepAlive
@@ -1439,10 +1511,12 @@ Specifies whether
 should look up the remote host name, and to check that
 the resolved host name for the remote IP address maps back to the
 very same IP address.
+The default is
+.Dq yes .
 .Pp
 If this option is set to
 .Cm no
-(the default) then only addresses and not host names may be used in
+then only addresses and not host names may be used in
 .Pa ~/.ssh/authorized_keys
 .Cm from
 and
@@ -1507,6 +1581,12 @@ Specifies the first display number available for
 X11 forwarding.
 This prevents sshd from interfering with real X11 servers.
 The default is 10.
+.It Cm X11MaxDisplays
+Specifies the maximum number of displays available for
+.Xr sshd 8 Ns 's
+X11 forwarding.
+This prevents sshd from exhausting local ports.
+The default is 1000.
 .It Cm X11Forwarding
 Specifies whether X11 forwarding is permitted.
 The argument must be

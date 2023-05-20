@@ -848,6 +848,24 @@ Contains Diffie-Hellman groups used for DH-GEX.
 The file format is described in
 .Xr moduli 5 .
 .El
+.Sh ENVIRONMENT
+.Bl -tag -width Ds -compact
+.Pp
+.It Pa SSH_USE_STRONG_RNG
+The reseeding of the OpenSSL random generator is usually done from
+.Cm /dev/urandom .
+If the 
+.Cm SSH_USE_STRONG_RNG
+environment variable is set to value other than
+.Cm 0
+the OpenSSL random generator is reseeded from
+.Cm /dev/random .
+The number of bytes read is defined by the SSH_USE_STRONG_RNG value. 
+Minimum is 14 bytes.
+This setting is not recommended on the computers without the hardware
+random generator because insufficient entropy causes the connection to 
+be blocked until enough entropy is available.
+.El
 .Sh SEE ALSO
 .Xr ssh 1 ,
 .Xr ssh-add 1 ,

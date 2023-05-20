@@ -99,6 +99,9 @@ if [ -n "$SSH_AUTH_SOCK" ] && ssh-add -L >/dev/null 2>&1 ; then
   GET_ID="ssh-add -L"
 fi
 
+# legacy environment variable implies forced copy
+[ "x$SSH_COPY_ID_LEGACY" != "x" ] && FORCED=1
+
 while test "$#" -gt 0
 do
   [ "${SEEN_OPT_I}" ] && expr "$1" : "[-]i" >/dev/null && {

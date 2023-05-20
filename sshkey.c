@@ -34,6 +34,7 @@
 #include <openssl/evp.h>
 #include <openssl/err.h>
 #include <openssl/pem.h>
+#include <openssl/fips.h>
 #endif
 
 #include "crypto_api.h"
@@ -57,6 +58,8 @@
 #define SSHKEY_INTERNAL
 #include "sshkey.h"
 #include "match.h"
+#include "xmalloc.h"
+#include "log.h"
 
 /* openssh private key file format */
 #define MARK_BEGIN		"-----BEGIN OPENSSH PRIVATE KEY-----\n"
@@ -114,6 +117,7 @@ static const struct keytype keytypes[] = {
 #  endif /* OPENSSL_HAS_NISTP521 */
 # endif /* OPENSSL_HAS_ECC */
 #endif /* WITH_OPENSSL */
+	{ "null", "null", KEY_NULL, 0, 0, 1 },
 	{ NULL, NULL, -1, -1, 0, 0 }
 };
 
@@ -298,6 +302,33 @@ sshkey_type_is_valid_ca(int type)
 	default:
 		return 0;
 	}
+}
+
+int
+sshkey_is_private(const struct sshkey *k)
+{
+      switch (k->type) {
+#ifdef WITH_OPENSSL
+      case KEY_RSA_CERT:
+      case KEY_RSA1:
+      case KEY_RSA:
+              return k->rsa->d != NULL;
+      case KEY_DSA_CERT:
+      case KEY_DSA:
+              return k->dsa->priv_key != NULL;
+#ifdef OPENSSL_HAS_ECC
+      case KEY_ECDSA_CERT:
+      case KEY_ECDSA:
+              return EC_KEY_get0_private_key(k->ecdsa) != NULL;
+#endif /* OPENSSL_HAS_ECC */
+#endif /* WITH_OPENSSL */
+      case KEY_ED25519_CERT:
+      case KEY_ED25519:
+              return (k->ed25519_pk != NULL);
+      default:
+              /* fatal("key_is_private: bad key type %d", k->type); */
+              return 0;
+      }
 }
 
 int
@@ -1190,6 +1221,30 @@ sshkey_fingerprint(const struct sshkey *k, int dgst_alg,
 	return retval;
 }
 
+char *
+sshkey_format_oneline(const struct sshkey *key, int dgst_alg)
+{
+	char *fp, *result;
+
+	if (sshkey_is_cert(key)) {
+		fp = sshkey_fingerprint(key->cert->signature_key, dgst_alg,
+		    SSH_FP_DEFAULT);
+		xasprintf(&result, "%s ID %s (serial %llu) CA %s %s",
+		    sshkey_type(key), key->cert->key_id,
+		    (unsigned long long)key->cert->serial,
+		    sshkey_type(key->cert->signature_key),
+		    fp == NULL ? "(null)" : fp);
+		free(fp);
+	} else {
+		fp = sshkey_fingerprint(key, dgst_alg, SSH_FP_DEFAULT);
+		xasprintf(&result, "%s %s", sshkey_type(key),
+		    fp == NULL ? "(null)" : fp);
+		free(fp);
+	}
+
+	return result;
+}
+
 #ifdef WITH_SSH1
 /*
  * Reads a multiple-precision integer in decimal from the buffer, and advances
@@ -1236,6 +1291,9 @@ sshkey_read(struct sshkey *ret, char **cpp)
 #ifdef WITH_SSH1
 	u_long bits;
 #endif /* WITH_SSH1 */
+
+	if (ret == NULL)
+		return SSH_ERR_INVALID_ARGUMENT;
 
 	cp = *cpp;
 
@@ -1373,8 +1431,6 @@ sshkey_read(struct sshkey *ret, char **cpp)
 		retval = 0;
 /*XXXX*/
 		sshkey_free(k);
-		if (retval != 0)
-			break;
 		break;
 	default:
 		return SSH_ERR_INVALID_ARGUMENT;
@@ -1527,6 +1583,8 @@ rsa_generate_private_key(u_int bits, RSA **rsap)
 	}
 	if (!BN_set_word(f4, RSA_F4) ||
 	    !RSA_generate_key_ex(private, bits, f4, NULL)) {
+			if (FIPS_mode())
+				logit("%s: the key length might be unsupported by FIPS mode approved key generation method", __func__);
 		ret = SSH_ERR_LIBCRYPTO_ERROR;
 		goto out;
 	}
@@ -3868,8 +3926,11 @@ sshkey_parse_private_fileblob_type(struct sshbuf *blob, int type,
 	switch (type) {
 #ifdef WITH_SSH1
 	case KEY_RSA1:
-		return sshkey_parse_private_rsa1(blob, passphrase,
-		    keyp, commentp);
+		if (! FIPS_mode())
+			return sshkey_parse_private_rsa1(blob, passphrase,
+			    keyp, commentp);
+		error("%s: cannot parse rsa1 key in FIPS mode", __func__);
+		return SSH_ERR_KEY_TYPE_UNKNOWN;
 #endif /* WITH_SSH1 */
 #ifdef WITH_OPENSSL
 	case KEY_DSA:
@@ -3908,8 +3969,9 @@ sshkey_parse_private_fileblob(struct sshbuf *buffer, const char *passphrase,
 #ifdef WITH_SSH1
 	/* it's a SSH v1 key if the public key part is readable */
 	if (sshkey_parse_public_rsa1_fileblob(buffer, NULL, NULL) == 0) {
-		return sshkey_parse_private_fileblob_type(buffer, KEY_RSA1,
-		    passphrase, keyp, commentp);
+		if (!FIPS_mode())
+			return sshkey_parse_private_fileblob_type(buffer, KEY_RSA1,
+			    passphrase, keyp, commentp);
 	}
 #endif /* WITH_SSH1 */
 	return sshkey_parse_private_fileblob_type(buffer, KEY_UNSPEC,

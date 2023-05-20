@@ -62,6 +62,9 @@ struct Authctxt {
 	char		*service;
 	struct passwd	*pw;		/* set if 'valid' */
 	char		*style;
+#ifdef WITH_SELINUX
+	char		*role;
+#endif
 	void		*kbdintctxt;
 	char		*info;		/* Extra info for next auth_log */
 #ifdef BSD_AUTH
@@ -81,6 +84,9 @@ struct Authctxt {
 
 	struct sshkey	**prev_userkeys;
 	u_int		 nprev_userkeys;
+
+	char		*last_details;
+	char		*auth_details;
 };
 /*
  * Every authentication method has to handle authentication requests for
@@ -179,6 +185,7 @@ struct passwd * getpwnamallow(const char *user);
 
 char	*expand_authorized_keys(const char *, struct passwd *pw);
 char	*authorized_principals_file(struct passwd *);
+int	 user_key_verify(const Key *, const u_char *, u_int, const u_char *, u_int);
 
 FILE	*auth_openkeyfile(const char *, struct passwd *, int);
 FILE	*auth_openprincipals(const char *, struct passwd *, int);
@@ -198,6 +205,7 @@ Key	*get_hostkey_private_by_type(int, int, struct ssh *);
 int	 get_hostkey_index(Key *, int, struct ssh *);
 int	 sshd_hostkey_sign(Key *, Key *, u_char **, size_t *,
 	     const u_char *, size_t, const char *, u_int);
+int	 hostbased_key_verify(const Key *, const u_char *, u_int, const u_char *, u_int);
 
 /* debug messages during authentication */
 void	 auth_debug_add(const char *fmt,...) __attribute__((format(printf, 1, 2)));
@@ -213,5 +221,7 @@ int	 sys_auth_passwd(Authctxt *, const char *);
 #if defined(KRB5) && !defined(HEIMDAL)
 #include <krb5.h>
 krb5_error_code ssh_krb5_cc_gen(krb5_context, krb5_ccache *);
+krb5_error_code ssh_krb5_get_k5login_directory(krb5_context ctx,
+	char **k5login_directory);
 #endif
 #endif

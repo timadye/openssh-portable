@@ -922,9 +922,9 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 				    "of known hosts.", type, ip);
 		} else if (options.visual_host_key) {
 			fp = sshkey_fingerprint(host_key,
-			    options.fingerprint_hash, SSH_FP_DEFAULT);
+			    options.fingerprint_hash[0], SSH_FP_DEFAULT);
 			ra = sshkey_fingerprint(host_key,
-			    options.fingerprint_hash, SSH_FP_RANDOMART);
+			    options.fingerprint_hash[0], SSH_FP_RANDOMART);
 			if (fp == NULL || ra == NULL)
 				fatal("%s: sshkey_fingerprint fail", __func__);
 			logit("Host key fingerprint is %s\n%s", fp, ra);
@@ -966,12 +966,6 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 			else
 				snprintf(msg1, sizeof(msg1), ".");
 			/* The default */
-			fp = sshkey_fingerprint(host_key,
-			    options.fingerprint_hash, SSH_FP_DEFAULT);
-			ra = sshkey_fingerprint(host_key,
-			    options.fingerprint_hash, SSH_FP_RANDOMART);
-			if (fp == NULL || ra == NULL)
-				fatal("%s: sshkey_fingerprint fail", __func__);
 			msg2[0] = '\0';
 			if (options.verify_host_key_dns) {
 				if (matching_host_key_dns)
@@ -985,16 +979,28 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 			}
 			snprintf(msg, sizeof(msg),
 			    "The authenticity of host '%.200s (%s)' can't be "
-			    "established%s\n"
-			    "%s key fingerprint is %s.%s%s\n%s"
+			    "established%s\n", host, ip, msg1);
+			for (i = 0; i < (u_int) options.num_fingerprint_hash; i++) {
+				fp = sshkey_fingerprint(host_key,
+				    options.fingerprint_hash[i], SSH_FP_DEFAULT);
+				ra = sshkey_fingerprint(host_key,
+				    options.fingerprint_hash[i], SSH_FP_RANDOMART);
+				if (fp == NULL || ra == NULL)
+					fatal("%s: sshkey_fingerprint fail", __func__);
+				len = strlen(msg);
+				snprintf(msg+len, sizeof(msg)-len,
+				    "%s key fingerprint is %s.%s%s\n%s",
+				    type, fp,
+				    options.visual_host_key ? "\n" : "",
+				    options.visual_host_key ? ra : "",
+				    msg2);
+				free(ra);
+				free(fp);
+			}
+			len = strlen(msg);
+			snprintf(msg+len, sizeof(msg)-len,
 			    "Are you sure you want to continue connecting "
-			    "(yes/no)? ",
-			    host, ip, msg1, type, fp,
-			    options.visual_host_key ? "\n" : "",
-			    options.visual_host_key ? ra : "",
-			    msg2);
-			free(ra);
-			free(fp);
+			    "(yes/no)? ");
 			if (!confirm(msg))
 				goto fail;
 			hostkey_trusted = 1; /* user explicitly confirmed */
@@ -1244,7 +1250,7 @@ verify_host_key(char *host, struct sockaddr *hostaddr, Key *host_key)
 	struct sshkey *plain = NULL;
 
 	if ((fp = sshkey_fingerprint(host_key,
-	    options.fingerprint_hash, SSH_FP_DEFAULT)) == NULL) {
+	    options.fingerprint_hash[0], SSH_FP_DEFAULT)) == NULL) {
 		error("%s: fingerprint host key: %s", __func__, ssh_err(r));
 		r = -1;
 		goto out;
@@ -1252,7 +1258,7 @@ verify_host_key(char *host, struct sockaddr *hostaddr, Key *host_key)
 
 	if (sshkey_is_cert(host_key)) {
 		if ((cafp = sshkey_fingerprint(host_key->cert->signature_key,
-		    options.fingerprint_hash, SSH_FP_DEFAULT)) == NULL) {
+		    options.fingerprint_hash[0], SSH_FP_DEFAULT)) == NULL) {
 			error("%s: fingerprint CA key: %s",
 			    __func__, ssh_err(r));
 			r = -1;
@@ -1432,9 +1438,9 @@ show_other_keys(struct hostkeys *hostkeys, Key *key)
 		if (!lookup_key_in_hostkeys_by_type(hostkeys, type[i], &found))
 			continue;
 		fp = sshkey_fingerprint(found->key,
-		    options.fingerprint_hash, SSH_FP_DEFAULT);
+		    options.fingerprint_hash[0], SSH_FP_DEFAULT);
 		ra = sshkey_fingerprint(found->key,
-		    options.fingerprint_hash, SSH_FP_RANDOMART);
+		    options.fingerprint_hash[0], SSH_FP_RANDOMART);
 		if (fp == NULL || ra == NULL)
 			fatal("%s: sshkey_fingerprint fail", __func__);
 		logit("WARNING: %s key found for host %s\n"
@@ -1457,7 +1463,7 @@ warn_changed_key(Key *host_key)
 {
 	char *fp;
 
-	fp = sshkey_fingerprint(host_key, options.fingerprint_hash,
+	fp = sshkey_fingerprint(host_key, options.fingerprint_hash[0],
 	    SSH_FP_DEFAULT);
 	if (fp == NULL)
 		fatal("%s: sshkey_fingerprint fail", __func__);
@@ -1532,6 +1538,7 @@ maybe_add_key_to_agent(char *authfile, Key *private, char *comment,
 	if (options.add_keys_to_agent == 2 &&
 	    !ask_permission("Add key %s (%s) to agent?", authfile, comment)) {
 		debug3("user denied adding this key");
+		close(auth_sock);
 		return;
 	}
 
@@ -1540,4 +1547,5 @@ maybe_add_key_to_agent(char *authfile, Key *private, char *comment,
 		debug("identity added to agent: %s", authfile);
 	else
 		debug("could not add identity to agent: %s (%d)", authfile, r);
+	close(auth_sock);
 }

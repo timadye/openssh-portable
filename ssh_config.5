@@ -652,12 +652,13 @@ or
 .Cm no
 (the default).
 .It Cm FingerprintHash
-Specifies the hash algorithm used when displaying key fingerprints.
+Specifies the hash algorithms used when displaying key fingerprints.
 Valid options are:
 .Cm md5
 and
-.Cm sha256
-(the default).
+.Cm sha256 .
+The default is
+.Cm "sha256 md5".
 .It Cm ForwardAgent
 Specifies whether the connection to the authentication agent (if any)
 will be forwarded to the remote machine.
@@ -748,10 +749,52 @@ The default is
 Specifies whether user authentication based on GSSAPI is allowed.
 The default is
 .Cm no .
+.It Cm GSSAPIClientIdentity
+If set, specifies the GSSAPI client identity that ssh should use when 
+connecting to the server. The default is unset, which means that the default 
+identity will be used.
 .It Cm GSSAPIDelegateCredentials
 Forward (delegate) credentials to the server.
 The default is
 .Cm no .
+.It Cm GSSAPIKeyExchange
+Specifies whether key exchange based on GSSAPI may be used. When using
+GSSAPI key exchange the server need not have a host key.
+The default is
+.Dq no .
+.It Cm GSSAPIRenewalForcesRekey
+If set to 
+.Dq yes
+then renewal of the client's GSSAPI credentials will force the rekeying of the
+ssh connection. With a compatible server, this can delegate the renewed 
+credentials to a session on the server.
+The default is
+.Dq no .
+.It Cm GSSAPIServerIdentity
+If set, specifies the GSSAPI server identity that ssh should expect when 
+connecting to the server. The default is unset, which means that the
+expected GSSAPI server identity will be determined from the target
+hostname.
+.It Cm GSSAPITrustDns
+Set to 
+.Dq yes to indicate that the DNS is trusted to securely canonicalize
+the name of the host being connected to. If 
+.Dq no, the hostname entered on the
+command line will be passed untouched to the GSSAPI library.
+The default is
+.Dq no .
+.It Cm GSSAPIKexAlgorithms
+The list of key exchange algorithms that are offered for GSSAPI
+key exchange. Possible values are
+.Bd -literal -offset 3n
+gss-gex-sha1-,
+gss-group1-sha1-,
+gss-group14-sha1-
+.Ed
+.Pp
+The default is
+.Dq gss-gex-sha1-,gss-group1-sha1-,gss-group14-sha1- .
+This option only applies to protocol version 2 connections using GSSAPI.
 .It Cm HashKnownHosts
 Indicates that
 .Xr ssh 1
@@ -791,8 +834,9 @@ ecdsa-sha2-nistp384-cert-v01@openssh.com,
 ecdsa-sha2-nistp521-cert-v01@openssh.com,
 ssh-ed25519-cert-v01@openssh.com,
 ssh-rsa-cert-v01@openssh.com,
+ssh-dss-cert-v01@openssh.com,
 ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,
-ssh-ed25519,ssh-rsa
+ssh-ed25519,ssh-rsa,ssh-dss
 .Ed
 .Pp
 The
@@ -814,8 +858,9 @@ ecdsa-sha2-nistp384-cert-v01@openssh.com,
 ecdsa-sha2-nistp521-cert-v01@openssh.com,
 ssh-ed25519-cert-v01@openssh.com,
 ssh-rsa-cert-v01@openssh.com,
+ssh-dss-cert-v01@openssh.com,
 ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,
-ssh-ed25519,ssh-rsa
+ssh-ed25519,ssh-rsa,ssh-dss
 .Ed
 .Pp
 If hostkeys are known for the destination host then this default is modified
@@ -1033,7 +1078,8 @@ curve25519-sha256,curve25519-sha256@libssh.org,
 ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,
 diffie-hellman-group-exchange-sha256,
 diffie-hellman-group-exchange-sha1,
-diffie-hellman-group14-sha1
+diffie-hellman-group14-sha1,
+diffie-hellman-group1-sha1
 .Ed
 .Pp
 The list of available key exchange algorithms may also be obtained using
@@ -1271,8 +1317,9 @@ ecdsa-sha2-nistp384-cert-v01@openssh.com,
 ecdsa-sha2-nistp521-cert-v01@openssh.com,
 ssh-ed25519-cert-v01@openssh.com,
 ssh-rsa-cert-v01@openssh.com,
+ssh-dss-cert-v01@openssh.com,
 ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,
-ssh-ed25519,ssh-rsa
+ssh-ed25519,ssh-rsa,ssh-dsa
 .Ed
 .Pp
 The list of available key types may also be obtained using

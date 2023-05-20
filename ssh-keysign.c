@@ -285,7 +285,7 @@ main(int argc, char **argv)
 		}
 	}
 	if (!found) {
-		if ((fp = sshkey_fingerprint(key, options.fingerprint_hash,
+		if ((fp = sshkey_fingerprint(key, options.fingerprint_hash[0],
 		    SSH_FP_DEFAULT)) == NULL)
 			fatal("%s: sshkey_fingerprint failed", __progname);
 		fatal("no matching hostkey found for key %s %s",

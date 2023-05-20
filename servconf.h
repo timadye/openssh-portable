@@ -48,8 +48,14 @@
 #define FORWARD_LOCAL		(1<<1)
 #define FORWARD_ALLOW		(FORWARD_REMOTE|FORWARD_LOCAL)
 
+/* Expose AuthenticationMethods */
+#define EXPOSE_AUTHMETH_NEVER   0
+#define EXPOSE_AUTHMETH_PAMONLY 1
+#define EXPOSE_AUTHMETH_PAMENV  2
+
 #define DEFAULT_AUTH_FAIL_MAX	6	/* Default for MaxAuthTries */
 #define DEFAULT_SESSIONS_MAX	10	/* Default for MaxSessions */
+#define DEFAULT_MAX_DISPLAYS	1000 /* Maximum number of fake X11 displays to try. */
 
 /* Magic name for internal sftp-server */
 #define INTERNAL_SFTP_NAME	"internal-sftp"
@@ -80,6 +86,7 @@ typedef struct {
 	int     x11_forwarding;	/* If true, permit inet (spoofing) X11 fwd. */
 	int     x11_display_offset;	/* What DISPLAY number to start
 					 * searching at */
+	int 	x11_max_displays; /* Number of displays to search */
 	int     x11_use_localhost;	/* If true, use localhost for fake X11 server. */
 	char   *xauth_location;	/* Location of xauth program */
 	int	permit_tty;	/* If false, deny pty allocation */
@@ -112,8 +119,11 @@ typedef struct {
 	int     kerberos_get_afs_token;		/* If true, try to get AFS token if
 						 * authenticated with Kerberos. */
 	int     gss_authentication;	/* If true, permit GSSAPI authentication */
+	int     gss_keyex;		/* If true, permit GSSAPI key exchange */
 	int     gss_cleanup_creds;	/* If true, destroy cred cache on logout */
 	int     gss_strict_acceptor;	/* If true, restrict the GSSAPI acceptor name */
+	int 	gss_store_rekey;
+	char   *gss_kex_algorithms;	/* GSSAPI kex methods to be offered by client. */
 	int     password_authentication;	/* If true, permit password
 						 * authentication. */
 	int     kbd_interactive_authentication;	/* If true, permit */
@@ -149,6 +159,7 @@ typedef struct {
 	int	max_authtries;
 	int	max_sessions;
 	char   *banner;			/* SSH-2 banner message */
+	int	show_patchlevel;	/* Show vendor patch level to clients */
 	int	use_dns;
 	int	client_alive_interval;	/*
 					 * poke the client this often to
@@ -171,6 +182,8 @@ typedef struct {
 
 	int	num_permitted_opens;
 
+	int		use_kuserok;
+	int		enable_k5users;
 	char   *chroot_directory;
 	char   *revoked_keys_file;
 	char   *trusted_user_ca_keys;
@@ -189,6 +202,8 @@ typedef struct {
 	char   *auth_methods[MAX_AUTH_METHODS];
 
 	int	fingerprint_hash;
+
+	int	expose_auth_methods; /* EXPOSE_AUTHMETH_* above */
 }       ServerOptions;
 
 /* Information about the incoming connection as used by Match */

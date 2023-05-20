@@ -76,6 +76,8 @@
 #include <openssl/evp.h>
 #include <openssl/err.h>
 #endif
+#include <openssl/fips.h>
+#include <fipscheck.h>
 #include "openbsd-compat/openssl-compat.h"
 #include "openbsd-compat/sys-queue.h"
 
@@ -530,6 +532,14 @@ main(int ac, char **av)
 	sanitise_stdfd();
 
 	__progname = ssh_get_progname(av[0]);
+        SSLeay_add_all_algorithms();
+	if (access("/etc/system-fips", F_OK) == 0)
+		if (! FIPSCHECK_verify(NULL, NULL)){
+			if (FIPS_mode())
+				fatal("FIPS integrity verification test failed.");
+			else
+				logit("FIPS integrity verification test failed.");
+	}
 
 #ifndef HAVE_SETPROCTITLE
 	/* Prepare for later setproctitle emulation */
@@ -609,6 +619,9 @@ main(int ac, char **av)
 	    "ACD:E:F:GI:J:KL:MNO:PQ:R:S:TVw:W:XYy")) != -1) {
 		switch (opt) {
 		case '1':
+			if (FIPS_mode()) {
+				fatal("Protocol 1 not allowed in the FIPS mode.");
+			}
 			options.protocol = SSH_PROTO_1;
 			break;
 		case '2':
@@ -964,7 +977,6 @@ main(int ac, char **av)
 	host_arg = xstrdup(host);
 
 #ifdef WITH_OPENSSL
-	OpenSSL_add_all_algorithms();
 	ERR_load_crypto_strings();
 #endif
 
@@ -1175,6 +1187,10 @@ main(int ac, char **av)
 
 	seed_rng();
 
+	if (FIPS_mode()) {
+		logit("FIPS mode initialized");
+	}
+
 	if (options.user == NULL)
 		options.user = xstrdup(pw->pw_name);
 
@@ -1262,6 +1278,12 @@ main(int ac, char **av)
 	}
 
 	timeout_ms = options.connection_timeout * 1000;
+
+	if (FIPS_mode()) {
+		options.protocol &= SSH_PROTO_2;
+		if (options.protocol == 0)
+			fatal("Protocol 2 disabled by configuration but required in the FIPS mode.");
+	}
 
 	/* Open a connection to the remote host. */
 	if (ssh_connect(host, addrs, &hostaddr, options.port,

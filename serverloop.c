@@ -125,13 +125,13 @@ notify_setup(void)
 static void
 notify_parent(void)
 {
-	if (notify_pipe[1] != -1)
+	if (notify_pipe[1] >= 0)
 		(void)write(notify_pipe[1], "", 1);
 }
 static void
 notify_prepare(fd_set *readset)
 {
-	if (notify_pipe[0] != -1)
+	if (notify_pipe[0] >= 0)
 		FD_SET(notify_pipe[0], readset);
 }
 static void
@@ -139,8 +139,8 @@ notify_done(fd_set *readset)
 {
 	char c;
 
-	if (notify_pipe[0] != -1 && FD_ISSET(notify_pipe[0], readset))
-		while (read(notify_pipe[0], &c, 1) != -1)
+	if (notify_pipe[0] >= 0 && FD_ISSET(notify_pipe[0], readset))
+		while (read(notify_pipe[0], &c, 1) >= 0)
 			debug2("notify_done: reading");
 }
 
@@ -225,9 +225,10 @@ wait_until_can_do_something(int connection_in, int connection_out,
 		uint64_t keepalive_ms =
 		    (uint64_t)options.client_alive_interval * 1000;
 
-		client_alive_scheduled = 1;
-		if (max_time_ms == 0 || max_time_ms > keepalive_ms)
+		if (max_time_ms == 0 || max_time_ms > keepalive_ms) {
 			max_time_ms = keepalive_ms;
+			client_alive_scheduled = 1;
+		}
 	}
 
 #if 0
@@ -518,7 +519,7 @@ server_request_tun(void)
 	}
 
 	tun = packet_get_int();
-	if (forced_tun_device != -1) {
+	if (forced_tun_device >= 0) {
 		if (tun != SSH_TUNID_ANY && forced_tun_device != tun)
 			goto done;
 		tun = forced_tun_device;

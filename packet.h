@@ -208,4 +208,5 @@ extern struct ssh *active_state;
 # undef EC_POINT
 #endif
 
+void	 packet_destroy_all(int, int);
 #endif				/* PACKET_H */

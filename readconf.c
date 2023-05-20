@@ -66,6 +66,7 @@
 #include "uidswap.h"
 #include "myproposal.h"
 #include "digest.h"
+#include "ssh-gss.h"
 
 /* Format of the configuration file:
 
@@ -160,6 +161,8 @@ typedef enum {
 	oClearAllForwardings, oNoHostAuthenticationForLocalhost,
 	oEnableSSHKeysign, oRekeyLimit, oVerifyHostKeyDNS, oConnectTimeout,
 	oAddressFamily, oGssAuthentication, oGssDelegateCreds,
+	oGssTrustDns, oGssKeyEx, oGssClientIdentity, oGssRenewalRekey,
+	oGssServerIdentity, oGssKexAlgorithms,
 	oServerAliveInterval, oServerAliveCountMax, oIdentitiesOnly,
 	oSendEnv, oControlPath, oControlMaster, oControlPersist,
 	oHashKnownHosts,
@@ -205,10 +208,21 @@ static struct {
 	{ "afstokenpassing", oUnsupported },
 #if defined(GSSAPI)
 	{ "gssapiauthentication", oGssAuthentication },
+	{ "gssapikeyexchange", oGssKeyEx },
 	{ "gssapidelegatecredentials", oGssDelegateCreds },
+	{ "gssapitrustdns", oGssTrustDns },
+	{ "gssapiclientidentity", oGssClientIdentity },
+	{ "gssapiserveridentity", oGssServerIdentity },
+	{ "gssapirenewalforcesrekey", oGssRenewalRekey },
+	{ "gssapikexalgorithms", oGssKexAlgorithms },
 #else
 	{ "gssapiauthentication", oUnsupported },
+	{ "gssapikeyexchange", oUnsupported },
 	{ "gssapidelegatecredentials", oUnsupported },
+	{ "gssapitrustdns", oUnsupported },
+	{ "gssapiclientidentity", oUnsupported },
+	{ "gssapirenewalforcesrekey", oUnsupported },
+	{ "gssapikexalgorithms", oUnsupported },
 #endif
 	{ "fallbacktorsh", oDeprecated },
 	{ "usersh", oDeprecated },
@@ -961,9 +975,41 @@ parse_time:
 		intptr = &options->gss_authentication;
 		goto parse_flag;
 
+	case oGssKeyEx:
+		intptr = &options->gss_keyex;
+		goto parse_flag;
+
 	case oGssDelegateCreds:
 		intptr = &options->gss_deleg_creds;
 		goto parse_flag;
+
+	case oGssTrustDns:
+		intptr = &options->gss_trust_dns;
+		goto parse_flag;
+
+	case oGssClientIdentity:
+		charptr = &options->gss_client_identity;
+		goto parse_string;
+
+	case oGssServerIdentity:
+		charptr = &options->gss_server_identity;
+		goto parse_string;
+
+	case oGssRenewalRekey:
+		intptr = &options->gss_renewal_rekey;
+		goto parse_flag;
+
+	case oGssKexAlgorithms:
+		arg = strdelim(&s);
+		if (!arg || *arg == '\0')
+			fatal("%.200s line %d: Missing argument.",
+			    filename, linenum);
+		if (!gss_kex_names_valid(arg))
+			fatal("%.200s line %d: Bad GSSAPI KexAlgorithms '%s'.",
+			    filename, linenum, arg ? arg : "<NONE>");
+		if (*activep && options->gss_kex_algorithms == NULL)
+			options->gss_kex_algorithms = strdup(arg);
+		break;
 
 	case oBatchMode:
 		intptr = &options->batch_mode;
@@ -1173,7 +1219,7 @@ parse_int:
 		value = cipher_number(arg);
 		if (value == -1)
 			fatal("%.200s line %d: Bad cipher '%s'.",
-			    filename, linenum, arg ? arg : "<NONE>");
+			    filename, linenum, arg);
 		if (*activep && *intptr == -1)
 			*intptr = value;
 		break;
@@ -1184,7 +1230,7 @@ parse_int:
 			fatal("%.200s line %d: Missing argument.", filename, linenum);
 		if (!ciphers_valid(*arg == '+' ? arg + 1 : arg))
 			fatal("%.200s line %d: Bad SSH2 cipher spec '%s'.",
-			    filename, linenum, arg ? arg : "<NONE>");
+			    filename, linenum, arg);
 		if (*activep && options->ciphers == NULL)
 			options->ciphers = xstrdup(arg);
 		break;
@@ -1195,7 +1241,7 @@ parse_int:
 			fatal("%.200s line %d: Missing argument.", filename, linenum);
 		if (!mac_valid(*arg == '+' ? arg + 1 : arg))
 			fatal("%.200s line %d: Bad SSH2 Mac spec '%s'.",
-			    filename, linenum, arg ? arg : "<NONE>");
+			    filename, linenum, arg);
 		if (*activep && options->macs == NULL)
 			options->macs = xstrdup(arg);
 		break;
@@ -1207,7 +1253,7 @@ parse_int:
 			    filename, linenum);
 		if (!kex_names_valid(*arg == '+' ? arg + 1 : arg))
 			fatal("%.200s line %d: Bad SSH2 KexAlgorithms '%s'.",
-			    filename, linenum, arg ? arg : "<NONE>");
+			    filename, linenum, arg);
 		if (*activep && options->kex_algorithms == NULL)
 			options->kex_algorithms = xstrdup(arg);
 		break;
@@ -1221,7 +1267,7 @@ parse_keytypes:
 			    filename, linenum);
 		if (!sshkey_names_valid2(*arg == '+' ? arg + 1 : arg, 1))
 			fatal("%s line %d: Bad key types '%s'.",
-				filename, linenum, arg ? arg : "<NONE>");
+				filename, linenum, arg);
 		if (*activep && *charptr == NULL)
 			*charptr = xstrdup(arg);
 		break;
@@ -1234,7 +1280,7 @@ parse_keytypes:
 		value = proto_spec(arg);
 		if (value == SSH_PROTO_UNKNOWN)
 			fatal("%.200s line %d: Bad protocol spec '%s'.",
-			    filename, linenum, arg ? arg : "<NONE>");
+			    filename, linenum, arg);
 		if (*activep && *intptr == SSH_PROTO_UNKNOWN)
 			*intptr = value;
 		break;
@@ -1486,6 +1532,7 @@ parse_keytypes:
 			if (r == GLOB_NOMATCH) {
 				debug("%.200s line %d: include %s matched no "
 				    "files",filename, linenum, arg2);
+				free(arg2);
 				continue;
 			} else if (r != 0 || gl.gl_pathc < 0)
 				fatal("%.200s line %d: glob failed for %s.",
@@ -1622,16 +1669,18 @@ parse_keytypes:
 		goto parse_string;
 
 	case oFingerprintHash:
-		intptr = &options->fingerprint_hash;
-		arg = strdelim(&s);
-		if (!arg || *arg == '\0')
-			fatal("%.200s line %d: Missing argument.",
-			    filename, linenum);
-		if ((value = ssh_digest_alg_by_name(arg)) == -1)
-			fatal("%.200s line %d: Invalid hash algorithm \"%s\".",
-			    filename, linenum, arg);
-		if (*activep && *intptr == -1)
-			*intptr = value;
+		if (*activep && options->num_fingerprint_hash == 0)
+			while ((arg = strdelim(&s)) != NULL && *arg != '\0') {
+				value = ssh_digest_alg_by_name(arg);
+				if (value == -1)
+					fatal("%s line %d: unknown fingerprints algorithm specs: %s.",
+						filename, linenum, arg);
+				if (options->num_fingerprint_hash >= SSH_DIGEST_MAX)
+					fatal("%s line %d: too many fingerprints algorithm specs.",
+						filename, linenum);
+				options->fingerprint_hash[
+					options->num_fingerprint_hash++] = value;
+			}
 		break;
 
 	case oUpdateHostkeys:
@@ -1776,7 +1825,13 @@ initialize_options(Options * options)
 	options->pubkey_authentication = -1;
 	options->challenge_response_authentication = -1;
 	options->gss_authentication = -1;
+	options->gss_keyex = -1;
 	options->gss_deleg_creds = -1;
+	options->gss_trust_dns = -1;
+	options->gss_renewal_rekey = -1;
+	options->gss_client_identity = NULL;
+	options->gss_server_identity = NULL;
+	options->gss_kex_algorithms = NULL;
 	options->password_authentication = -1;
 	options->kbd_interactive_authentication = -1;
 	options->kbd_interactive_devices = NULL;
@@ -1853,7 +1908,7 @@ initialize_options(Options * options)
 	options->canonicalize_fallback_local = -1;
 	options->canonicalize_hostname = -1;
 	options->revoked_host_keys = NULL;
-	options->fingerprint_hash = -1;
+	options->num_fingerprint_hash = 0;
 	options->update_hostkeys = -1;
 	options->hostbased_key_types = NULL;
 	options->pubkey_key_types = NULL;
@@ -1920,8 +1975,18 @@ fill_default_options(Options * options)
 		options->challenge_response_authentication = 1;
 	if (options->gss_authentication == -1)
 		options->gss_authentication = 0;
+	if (options->gss_keyex == -1)
+		options->gss_keyex = 0;
 	if (options->gss_deleg_creds == -1)
 		options->gss_deleg_creds = 0;
+	if (options->gss_trust_dns == -1)
+		options->gss_trust_dns = 0;
+	if (options->gss_renewal_rekey == -1)
+		options->gss_renewal_rekey = 0;
+#ifdef GSSAPI
+	if (options->gss_kex_algorithms == NULL)
+		options->gss_kex_algorithms = strdup(GSS_KEX_DEFAULT_KEX);
+#endif
 	if (options->password_authentication == -1)
 		options->password_authentication = 1;
 	if (options->kbd_interactive_authentication == -1)
@@ -2040,16 +2105,23 @@ fill_default_options(Options * options)
 		options->canonicalize_fallback_local = 1;
 	if (options->canonicalize_hostname == -1)
 		options->canonicalize_hostname = SSH_CANONICALISE_NO;
-	if (options->fingerprint_hash == -1)
-		options->fingerprint_hash = SSH_FP_HASH_DEFAULT;
+	if (options->num_fingerprint_hash == 0) {
+		options->fingerprint_hash[options->num_fingerprint_hash++] = SSH_DIGEST_SHA256;
+		options->fingerprint_hash[options->num_fingerprint_hash++] = (FIPS_mode() ? SSH_DIGEST_SHA1 : SSH_DIGEST_MD5);
+	}
 	if (options->update_hostkeys == -1)
 		options->update_hostkeys = 0;
-	if (kex_assemble_names(KEX_CLIENT_ENCRYPT, &options->ciphers) != 0 ||
-	    kex_assemble_names(KEX_CLIENT_MAC, &options->macs) != 0 ||
-	    kex_assemble_names(KEX_CLIENT_KEX, &options->kex_algorithms) != 0 ||
-	    kex_assemble_names(KEX_DEFAULT_PK_ALG,
+	if (kex_assemble_names((FIPS_mode() ? KEX_FIPS_ENCRYPT
+	        : KEX_CLIENT_ENCRYPT), &options->ciphers) != 0 ||
+	    kex_assemble_names((FIPS_mode() ? KEX_FIPS_MAC
+	        : KEX_CLIENT_MAC), &options->macs) != 0 ||
+	    kex_assemble_names((FIPS_mode() ? KEX_DEFAULT_KEX_FIPS
+	        : KEX_CLIENT_KEX), &options->kex_algorithms) != 0 ||
+	    kex_assemble_names((FIPS_mode() ? KEX_FIPS_PK_ALG
+	        : KEX_DEFAULT_PK_ALG),
 	    &options->hostbased_key_types) != 0 ||
-	    kex_assemble_names(KEX_DEFAULT_PK_ALG,
+	    kex_assemble_names((FIPS_mode() ? KEX_FIPS_PK_ALG
+	        : KEX_DEFAULT_PK_ALG),
 	    &options->pubkey_key_types) != 0)
 		fatal("%s: kex_assemble_names failed", __func__);
 
@@ -2427,6 +2499,17 @@ dump_cfg_strarray(OpCodes code, u_int count, char **vals)
 }
 
 static void
+dump_cfg_fmtarray(OpCodes code, u_int count, int *vals)
+{
+	u_int i;
+
+	printf("%s", lookup_opcode_name(code));
+	for (i = 0; i < count; i++)
+		printf(" %s", fmt_intarg(code, vals[i]));
+	printf("\n");
+}
+
+static void
 dump_cfg_strarray_oneline(OpCodes code, u_int count, char **vals)
 {
 	u_int i;
@@ -2482,7 +2565,8 @@ dump_client_config(Options *o, const char *host)
 	char buf[8];
 
 	/* This is normally prepared in ssh_kex2 */
-	if (kex_assemble_names(KEX_DEFAULT_PK_ALG, &o->hostkeyalgorithms) != 0)
+	if (kex_assemble_names((FIPS_mode() ? KEX_FIPS_PK_ALG
+	    : KEX_DEFAULT_PK_ALG), &o->hostkeyalgorithms) != 0)
 		fatal("%s: kex_assemble_names failed", __func__);
 
 	/* Most interesting options first: user, host, port */
@@ -2502,7 +2586,6 @@ dump_client_config(Options *o, const char *host)
 	dump_cfg_fmtint(oEnableSSHKeysign, o->enable_ssh_keysign);
 	dump_cfg_fmtint(oClearAllForwardings, o->clear_forwardings);
 	dump_cfg_fmtint(oExitOnForwardFailure, o->exit_on_forward_failure);
-	dump_cfg_fmtint(oFingerprintHash, o->fingerprint_hash);
 	dump_cfg_fmtint(oForwardAgent, o->forward_agent);
 	dump_cfg_fmtint(oForwardX11, o->forward_x11);
 	dump_cfg_fmtint(oForwardX11Trusted, o->forward_x11_trusted);
@@ -2572,6 +2655,7 @@ dump_client_config(Options *o, const char *host)
 	dump_cfg_strarray_oneline(oGlobalKnownHostsFile, o->num_system_hostfiles, o->system_hostfiles);
 	dump_cfg_strarray_oneline(oUserKnownHostsFile, o->num_user_hostfiles, o->user_hostfiles);
 	dump_cfg_strarray(oSendEnv, o->num_send_env, o->send_env);
+	dump_cfg_fmtarray(oFingerprintHash, o->num_fingerprint_hash, o->fingerprint_hash);
 
 	/* Special cases */
 

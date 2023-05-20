@@ -536,8 +536,8 @@ pkcs11_fetch_keys_filter(struct pkcs11_provider *p, CK_ULONG slotidx,
 				X509_free(x509);
 		}
 		if (rsa && rsa->n && rsa->e &&
-		    pkcs11_rsa_wrap(p, slotidx, &attribs[0], rsa) == 0) {
-			key = sshkey_new(KEY_UNSPEC);
+		    pkcs11_rsa_wrap(p, slotidx, &attribs[0], rsa) == 0 &&
+		    (key = sshkey_new(KEY_UNSPEC)) != NULL) {
 			key->rsa = rsa;
 			key->type = KEY_RSA;
 			key->flags |= SSHKEY_FLAG_EXT;

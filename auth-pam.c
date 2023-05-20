@@ -688,6 +688,11 @@ sshpam_init_ctx(Authctxt *authctxt)
 		return (NULL);
 	}
 
+	/* Notify PAM about any already successful auth methods */
+	if (options.expose_auth_methods >= EXPOSE_AUTHMETH_PAMONLY &&
+			authctxt->auth_details)
+		do_pam_putenv("SSH_USER_AUTH", authctxt->auth_details);
+
 	ctxt = xcalloc(1, sizeof *ctxt);
 
 	/* Start the authentication thread */
@@ -830,6 +835,8 @@ fake_password(const char *wire_password)
 		fatal("%s: password length too long: %zu", __func__, l);
 
 	ret = malloc(l + 1);
+	if (ret == NULL)
+		return NULL;
 	for (i = 0; i < l; i++)
 		ret[i] = junk[i % (sizeof(junk) - 1)];
 	ret[i] = '\0';
@@ -1087,7 +1094,7 @@ is_pam_session_open(void)
  * during the ssh authentication process.
  */
 int
-do_pam_putenv(char *name, char *value)
+do_pam_putenv(char *name, const char *value)
 {
 	int ret = 1;
 #ifdef HAVE_PAM_PUTENV

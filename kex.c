@@ -35,6 +35,7 @@
 #ifdef WITH_OPENSSL
 #include <openssl/crypto.h>
 #include <openssl/dh.h>
+#include <openssl/fips.h>
 #endif
 
 #include "ssh2.h"
@@ -53,6 +54,11 @@
 #include "ssherr.h"
 #include "sshbuf.h"
 #include "digest.h"
+#include "audit.h"
+
+#ifdef GSSAPI
+#include "ssh-gss.h"
+#endif
 
 #if OPENSSL_VERSION_NUMBER >= 0x00907000L
 # if defined(HAVE_EVP_SHA256)
@@ -111,6 +117,33 @@ static const struct kexalg kexalgs[] = {
 	{ KEX_CURVE25519_SHA256, KEX_C25519_SHA256, 0, SSH_DIGEST_SHA256 },
 	{ KEX_CURVE25519_SHA256_OLD, KEX_C25519_SHA256, 0, SSH_DIGEST_SHA256 },
 #endif /* HAVE_EVP_SHA256 || !WITH_OPENSSL */
+#ifdef GSSAPI
+	{ KEX_GSS_GEX_SHA1_ID, KEX_GSS_GEX_SHA1, 0, SSH_DIGEST_SHA1 },
+	{ KEX_GSS_GRP1_SHA1_ID, KEX_GSS_GRP1_SHA1, 0, SSH_DIGEST_SHA1 },
+	{ KEX_GSS_GRP14_SHA1_ID, KEX_GSS_GRP14_SHA1, 0, SSH_DIGEST_SHA1 },
+#endif
+	{ NULL, -1, -1, -1},
+};
+
+static const struct kexalg kexalgs_fips[] = {
+	{ KEX_DH14_SHA1, KEX_DH_GRP14_SHA1, 0, SSH_DIGEST_SHA1 },
+	{ KEX_DH14_SHA256, KEX_DH_GRP14_SHA256, 0, SSH_DIGEST_SHA256 },
+	{ KEX_DH16_SHA512, KEX_DH_GRP16_SHA512, 0, SSH_DIGEST_SHA512 },
+	{ KEX_DH18_SHA512, KEX_DH_GRP18_SHA512, 0, SSH_DIGEST_SHA512 },
+	{ KEX_DHGEX_SHA1, KEX_DH_GEX_SHA1, 0, SSH_DIGEST_SHA1 },
+#ifdef HAVE_EVP_SHA256
+	{ KEX_DHGEX_SHA256, KEX_DH_GEX_SHA256, 0, SSH_DIGEST_SHA256 },
+#endif
+#ifdef OPENSSL_HAS_ECC
+	{ KEX_ECDH_SHA2_NISTP256, KEX_ECDH_SHA2,
+	    NID_X9_62_prime256v1, SSH_DIGEST_SHA256 },
+	{ KEX_ECDH_SHA2_NISTP384, KEX_ECDH_SHA2, NID_secp384r1,
+	    SSH_DIGEST_SHA384 },
+# ifdef OPENSSL_HAS_NISTP521
+	{ KEX_ECDH_SHA2_NISTP521, KEX_ECDH_SHA2, NID_secp521r1,
+	    SSH_DIGEST_SHA512 },
+# endif
+#endif
 	{ NULL, -1, -1, -1},
 };
 
@@ -141,9 +174,15 @@ kex_alg_by_name(const char *name)
 {
 	const struct kexalg *k;
 
-	for (k = kexalgs; k->name != NULL; k++) {
+	for (k = (FIPS_mode() ? kexalgs_fips : kexalgs); k->name != NULL; k++) {
 		if (strcmp(k->name, name) == 0)
 			return k;
+#ifdef GSSAPI
+		if (strncmp(name, "gss-", 4) == 0) {
+			if (strncmp(k->name, name, strlen(k->name)) == 0)
+				return k;
+		}
+#endif
 	}
 	return NULL;
 }
@@ -161,7 +200,10 @@ kex_names_valid(const char *names)
 	for ((p = strsep(&cp, ",")); p && *p != '\0';
 	    (p = strsep(&cp, ","))) {
 		if (kex_alg_by_name(p) == NULL) {
-			error("Unsupported KEX algorithm \"%.100s\"", p);
+			if (FIPS_mode())
+				error("\"%.100s\" is not allowed in FIPS mode", p);
+			else
+				error("Unsupported KEX algorithm \"%.100s\"", p);
 			free(s);
 			return 0;
 		}
@@ -178,7 +220,7 @@ kex_names_valid(const char *names)
 char *
 kex_names_cat(const char *a, const char *b)
 {
-	char *ret = NULL, *tmp = NULL, *cp, *p;
+	char *ret = NULL, *tmp = NULL, *cp, *p, *m;
 	size_t len;
 
 	if (a == NULL || *a == '\0')
@@ -195,8 +237,10 @@ kex_names_cat(const char *a, const char *b)
 	}
 	strlcpy(ret, a, len);
 	for ((p = strsep(&cp, ",")); p && *p != '\0'; (p = strsep(&cp, ","))) {
-		if (match_list(ret, p, NULL) != NULL)
+		if ((m = match_list(ret, p, NULL)) != NULL) {
+			free(m);
 			continue; /* Algorithm already present */
+		}
 		if (strlcat(ret, ",", len) >= len ||
 		    strlcat(ret, p, len) >= len) {
 			free(tmp);
@@ -231,6 +275,29 @@ kex_assemble_names(const char *def, char **list)
 	free(*list);
 	*list = ret;
 	return 0;
+}
+
+/* Validate GSS KEX method name list */
+int
+gss_kex_names_valid(const char *names)
+{
+	char *s, *cp, *p;
+
+	if (names == NULL || *names == '\0')
+		return 0;
+	s = cp = strdup(names);
+	for ((p = strsep(&cp, ",")); p && *p != '\0';
+	    (p = strsep(&cp, ","))) {
+		if (strncmp(p, "gss-", 4) != 0
+		  || kex_alg_by_name(p) == NULL) {
+			error("Unsupported KEX algorithm \"%.100s\"", p);
+			free(s);
+			return 0;
+		}
+	}
+	debug3("gss kex names ok: [%s]", names);
+	free(s);
+	return 1;
 }
 
 /* put algorithm proposal into buffer */
@@ -341,21 +408,14 @@ static int
 kex_send_ext_info(struct ssh *ssh)
 {
 	int r;
-	char *algs;
 
-	if ((algs = sshkey_alg_list(0, 1, ',')) == NULL)
-		return SSH_ERR_ALLOC_FAIL;
 	if ((r = sshpkt_start(ssh, SSH2_MSG_EXT_INFO)) != 0 ||
 	    (r = sshpkt_put_u32(ssh, 1)) != 0 ||
 	    (r = sshpkt_put_cstring(ssh, "server-sig-algs")) != 0 ||
-	    (r = sshpkt_put_cstring(ssh, algs)) != 0 ||
+	    (r = sshpkt_put_cstring(ssh, "rsa-sha2-256,rsa-sha2-512")) != 0 ||
 	    (r = sshpkt_send(ssh)) != 0)
-		goto out;
-	/* success */
-	r = 0;
- out:
-	free(algs);
-	return r;
+		return r;
+	return 0;
 }
 
 int
@@ -644,10 +704,16 @@ choose_enc(struct sshenc *enc, char *client, char *server)
 {
 	char *name = match_list(client, server, NULL);
 
-	if (name == NULL)
+	if (name == NULL) {
+#ifdef SSH_AUDIT_EVENTS
+		audit_unsupported(SSH_AUDIT_UNSUPPORTED_CIPHER);
+#endif
 		return SSH_ERR_NO_CIPHER_ALG_MATCH;
-	if ((enc->cipher = cipher_by_name(name)) == NULL)
+	}
+	if ((enc->cipher = cipher_by_name(name)) == NULL) {
+		free(name);
 		return SSH_ERR_INTERNAL_ERROR;
+	}
 	enc->name = name;
 	enc->enabled = 0;
 	enc->iv = NULL;
@@ -663,10 +729,16 @@ choose_mac(struct ssh *ssh, struct sshmac *mac, char *client, char *server)
 {
 	char *name = match_list(client, server, NULL);
 
-	if (name == NULL)
+	if (name == NULL) {
+#ifdef SSH_AUDIT_EVENTS
+		audit_unsupported(SSH_AUDIT_UNSUPPORTED_MAC);
+#endif
 		return SSH_ERR_NO_MAC_ALG_MATCH;
-	if (mac_setup(mac, name) < 0)
+	}
+	if (mac_setup(mac, name) < 0) {
+		free(name);
 		return SSH_ERR_INTERNAL_ERROR;
+	}
 	/* truncate the key */
 	if (ssh->compat & SSH_BUG_HMAC)
 		mac->key_len = 16;
@@ -681,8 +753,12 @@ choose_comp(struct sshcomp *comp, char *client, char *server)
 {
 	char *name = match_list(client, server, NULL);
 
-	if (name == NULL)
+	if (name == NULL) {
+#ifdef SSH_AUDIT_EVENTS
+		audit_unsupported(SSH_AUDIT_UNSUPPORTED_COMPRESSION);
+#endif
 		return SSH_ERR_NO_COMPRESS_ALG_MATCH;
+	}
 	if (strcmp(name, "zlib@openssh.com") == 0) {
 		comp->type = COMP_DELAYED;
 	} else if (strcmp(name, "zlib") == 0) {
@@ -690,6 +766,7 @@ choose_comp(struct sshcomp *comp, char *client, char *server)
 	} else if (strcmp(name, "none") == 0) {
 		comp->type = COMP_NONE;
 	} else {
+		free(name);
 		return SSH_ERR_INTERNAL_ERROR;
 	}
 	comp->name = name;
@@ -851,6 +928,10 @@ kex_choose_conf(struct ssh *ssh)
 		dh_need = MAXIMUM(dh_need, newkeys->enc.block_size);
 		dh_need = MAXIMUM(dh_need, newkeys->enc.iv_len);
 		dh_need = MAXIMUM(dh_need, newkeys->mac.key_len);
+		debug("kex: %s need=%d dh_need=%d", kex->name, need, dh_need);
+#ifdef SSH_AUDIT_EVENTS
+		audit_kex(mode, newkeys->enc.name, newkeys->mac.name, newkeys->comp.name, kex->name);
+#endif
 	}
 	/* XXX need runden? */
 	kex->we_need = need;
@@ -1025,3 +1106,33 @@ dump_digest(char *msg, u_char *digest, int len)
 	sshbuf_dump_data(digest, len, stderr);
 }
 #endif
+
+static void
+enc_destroy(struct sshenc *enc)
+{
+	if (enc == NULL)
+		return;
+
+	if (enc->key) {
+		memset(enc->key, 0, enc->key_len);
+		free(enc->key);
+	}
+
+	if (enc->iv) {
+		memset(enc->iv,  0, enc->iv_len);
+		free(enc->iv);
+	}
+
+	memset(enc, 0, sizeof(*enc));
+}
+
+void
+newkeys_destroy(struct newkeys *newkeys)
+{
+	if (newkeys == NULL)
+		return;
+
+	enc_destroy(&newkeys->enc);
+	mac_destroy(&newkeys->mac);
+	memset(&newkeys->comp, 0, sizeof(newkeys->comp));
+}

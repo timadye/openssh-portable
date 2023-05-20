@@ -157,7 +157,7 @@ killchild(int signo)
 {
 	if (do_cmd_pid > 1) {
 		kill(do_cmd_pid, signo ? signo : SIGTERM);
-		waitpid(do_cmd_pid, NULL, 0);
+		(void) waitpid(do_cmd_pid, NULL, 0);
 	}
 
 	if (signo)
@@ -652,7 +652,10 @@ toremote(char *targ, int argc, char **argv)
 			addargs(&alist, "%s", ssh_program);
 			addargs(&alist, "-x");
 			addargs(&alist, "-oClearAllForwardings=yes");
-			addargs(&alist, "-n");
+			if (isatty(fileno(stdin)))
+				addargs(&alist, "-t");
+			else
+				addargs(&alist, "-n");
 			for (j = 0; j < remote_remote_args.num; j++) {
 				addargs(&alist, "%s",
 				    remote_remote_args.list[j]);

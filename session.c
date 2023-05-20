@@ -138,7 +138,7 @@ extern int log_stderr;
 extern int debug_flag;
 extern u_int utmp_len;
 extern int startup_pipe;
-extern void destroy_sensitive_data(void);
+extern void destroy_sensitive_data(int);
 extern Buffer loginmsg;
 
 /* original command from peer. */
@@ -158,8 +158,13 @@ static Session *sessions = NULL;
 login_cap_t *lc;
 #endif
 
+#ifdef SSH_AUDIT_EVENTS
+int paudit[2];
+#endif
+
 static int is_child = 0;
 static int in_chroot = 0;
+static int have_dev_log = 1;
 
 /* Name and directory of socket for authentication agent forwarding. */
 static char *auth_sock_name = NULL;
@@ -284,6 +289,8 @@ xauth_valid_string(const char *s)
 	return 1;
 }
 
+void child_destory_sensitive_data();
+
 #define USE_PIPES 1
 /*
  * This is called to fork and execute a command when we have no tty.  This
@@ -365,8 +372,8 @@ do_exec_no_pty(Session *s, const char *command)
 		is_child = 1;
 
 		/* Child.  Reinitialize the log since the pid has changed. */
-		log_init(__progname, options.log_level,
-		    options.log_facility, log_stderr);
+		log_init_handler(__progname, options.log_level,
+		    options.log_facility, log_stderr, have_dev_log);
 
 		/*
 		 * Create a new session and process group since the 4.4BSD
@@ -418,6 +425,8 @@ do_exec_no_pty(Session *s, const char *command)
 #ifdef _UNICOS
 		cray_init_job(s->pw); /* set up cray jid and tmpdir */
 #endif
+
+		child_destory_sensitive_data();
 
 		/* Do processing for the child (exec command etc). */
 		do_child(s, command);
@@ -523,8 +532,8 @@ do_exec_pty(Session *s, const char *command)
 		close(ptymaster);
 
 		/* Child.  Reinitialize the log because the pid has changed. */
-		log_init(__progname, options.log_level,
-		    options.log_facility, log_stderr);
+		log_init_handler(__progname, options.log_level,
+		    options.log_facility, log_stderr, have_dev_log);
 		/* Close the master side of the pseudo tty. */
 		close(ptyfd);
 
@@ -541,6 +550,9 @@ do_exec_pty(Session *s, const char *command)
 
 		/* Close the extra descriptor for the pseudo tty. */
 		close(ttyfd);
+
+		/* Do this early, so we will not block large MOTDs */
+		child_destory_sensitive_data();
 
 		/* record login, etc. similar to login(1) */
 #ifdef _UNICOS
@@ -570,6 +582,14 @@ do_exec_pty(Session *s, const char *command)
 
 	/* Parent.  Close the slave side of the pseudo tty. */
 	close(ttyfd);
+
+#if !defined(HAVE_OSF_SIA) && defined(SSH_AUDIT_EVENTS)
+	/* do_login in the child did not affect state in this process,
+	   compensate.  From an architectural standpoint, this is extremely
+	   ugly. */
+	if (command != NULL)
+		audit_count_session_open();
+#endif
 
 	/* Enter interactive session. */
 	s->ptymaster = ptymaster;
@@ -619,6 +639,7 @@ do_exec(Session *s, const char *command)
 	int ret;
 	const char *forced = NULL, *tty = NULL;
 	char session_type[1024];
+	struct stat dev_log_stat;
 
 	if (options.adm_forced_command) {
 		original_command = command;
@@ -629,6 +650,29 @@ do_exec(Session *s, const char *command)
 		command = forced_command;
 		forced = "(key-option)";
 	}
+#ifdef GSSAPI
+#ifdef KRB5 /* k5users_allowed_cmds only available w/ GSSAPI+KRB5 */
+	else if (k5users_allowed_cmds) {
+		const char *match = command;
+		int allowed = 0, i = 0;
+
+		if (!match)
+			match = s->pw->pw_shell;
+		while (k5users_allowed_cmds[i]) {
+			if (strcmp(match, k5users_allowed_cmds[i++]) == 0) {
+				debug("Allowed command '%.900s'", match);
+				allowed = 1;
+				break;
+			}
+		}
+		if (!allowed) {
+			debug("command '%.900s' not allowed", match);
+			return 1;
+		}
+	}
+#endif
+#endif
+
 	if (forced != NULL) {
 		if (IS_INTERNAL_SFTP(command)) {
 			s->is_subsystem = s->is_subsystem ?
@@ -653,6 +697,10 @@ do_exec(Session *s, const char *command)
 			tty += 5;
 	}
 
+	if (lstat("/dev/log", &dev_log_stat) != 0) {
+		have_dev_log = 0;
+	}
+
 	verbose("Starting session: %s%s%s for %s from %.200s port %d id %d",
 	    session_type,
 	    tty == NULL ? "" : " on ",
@@ -663,15 +711,21 @@ do_exec(Session *s, const char *command)
 	    s->self);
 
 #ifdef SSH_AUDIT_EVENTS
+	if (s->command != NULL || s->command_handle != -1)
+		fatal("do_exec: command already set");
 	if (command != NULL)
-		PRIVSEP(audit_run_command(command));
+		s->command = xstrdup(command);
 	else if (s->ttyfd == -1) {
 		char *shell = s->pw->pw_shell;
 
 		if (shell[0] == '\0')	/* empty shell means /bin/sh */
 			shell =_PATH_BSHELL;
-		PRIVSEP(audit_run_command(shell));
+		s->command = xstrdup(shell);
 	}
+	if (s->command != NULL && s->ptyfd == -1)
+		s->command_handle = PRIVSEP(audit_run_command(s->command));
+	if (pipe(paudit) < 0)
+		fatal("pipe: %s", strerror(errno));
 #endif
 	if (s->ttyfd != -1)
 		ret = do_exec_pty(s, command);
@@ -686,6 +740,20 @@ do_exec(Session *s, const char *command)
 	 * multiple copies of the login messages.
 	 */
 	buffer_clear(&loginmsg);
+
+#ifdef SSH_AUDIT_EVENTS
+	close(paudit[1]);
+	if (use_privsep && ret == 0) {
+		/*
+		 * Read the audit messages from forked child and send them
+		 * back to monitor. We don't want to communicate directly,
+		 * because the messages might get mixed up.
+		 * Continue after the pipe gets closed (all messages sent).
+		 */
+		ret = mm_forward_audit_messages(paudit[0]);
+	}
+	close(paudit[0]);
+#endif /* SSH_AUDIT_EVENTS */
 
 	return ret;
 }
@@ -968,6 +1036,12 @@ copy_environment(char **source, char ***env, u_int *envsize)
 		}
 		*var_val++ = '\0';
 
+		if (options.expose_auth_methods < EXPOSE_AUTHMETH_PAMENV &&
+				strcmp(var_name, "SSH_USER_AUTH") == 0) {
+			free(var_name);
+			continue;
+		}
+
 		debug3("Copy environment: %s=%s", var_name, var_val);
 		child_set_env(env, envsize, var_name, var_val);
 
@@ -1143,6 +1217,11 @@ do_setup_env(Session *s, const char *shell)
 		free_pam_environment(p);
 	}
 #endif /* USE_PAM */
+
+	if (options.expose_auth_methods >= EXPOSE_AUTHMETH_PAMENV &&
+			s->authctxt->auth_details)
+		child_set_env(&env, &envsize, "SSH_USER_AUTH",
+		     s->authctxt->auth_details);
 
 	if (auth_sock_name != NULL)
 		child_set_env(&env, &envsize, SSH_AUTHSOCKET_ENV_NAME,
@@ -1361,6 +1440,9 @@ do_setusercontext(struct passwd *pw)
 			    pw->pw_uid);
 			chroot_path = percent_expand(tmp, "h", pw->pw_dir,
 			    "u", pw->pw_name, (char *)NULL);
+#ifdef WITH_SELINUX
+			sshd_selinux_copy_context();
+#endif
 			safely_chroot(chroot_path, pw->pw_uid);
 			free(tmp);
 			free(chroot_path);
@@ -1395,6 +1477,12 @@ do_setusercontext(struct passwd *pw)
 # endif /* USE_LIBIAF */
 		/* Permanently switch to the desired uid. */
 		permanently_set_uid(pw);
+#endif
+
+#ifdef WITH_SELINUX
+		if (options.chroot_directory == NULL ||
+		    strcasecmp(options.chroot_directory, "none") == 0)
+			sshd_selinux_copy_context();
 #endif
 	} else if (options.chroot_directory != NULL &&
 	    strcasecmp(options.chroot_directory, "none") != 0) {
@@ -1458,14 +1546,33 @@ child_close_fds(void)
 	 * descriptors left by system functions.  They will be closed later.
 	 */
 	endpwent();
+}
 
+void
+child_destory_sensitive_data()
+{
+#ifdef SSH_AUDIT_EVENTS
+	int pparent = paudit[1];
+	close(paudit[0]);
+	/* Hack the monitor pipe to avoid race condition with parent */
+	if (use_privsep)
+		mm_set_monitor_pipe(pparent);
+#endif
+
+	/* remove hostkey from the child's memory */
+	destroy_sensitive_data(use_privsep);
 	/*
-	 * Close any extra open file descriptors so that we don't have them
-	 * hanging around in clients.  Note that we want to do this after
-	 * initgroups, because at least on Solaris 2.3 it leaves file
-	 * descriptors open.
+	 * We can audit this, because we hacked the pipe to direct the
+	 * messages over postauth child. But this message requires answer
+	 * which we can't do using one-way pipe.
 	 */
-	closefrom(STDERR_FILENO + 1);
+	packet_destroy_all(0, 1);
+
+#ifdef SSH_AUDIT_EVENTS
+	/* Notify parent that we are done */
+	close(pparent);
+#endif
+
 }
 
 /*
@@ -1483,9 +1590,6 @@ do_child(Session *s, const char *command)
 	const char *shell, *shell0;
 	struct passwd *pw = s->pw;
 	int r = 0;
-
-	/* remove hostkey from the child's memory */
-	destroy_sensitive_data();
 
 	/* Force a password change */
 	if (s->authctxt->force_pwchange) {
@@ -1601,8 +1705,6 @@ do_child(Session *s, const char *command)
 			exit(1);
 	}
 
-	closefrom(STDERR_FILENO + 1);
-
 	do_rc_files(s, shell);
 
 	/* restore SIGPIPE for child */
@@ -1610,6 +1712,7 @@ do_child(Session *s, const char *command)
 
 	if (s->is_subsystem == SUBSYSTEM_INT_SFTP_ERROR) {
 		printf("This service allows sftp connections only.\n");
+		logit("The session allows sftp connections only");
 		fflush(NULL);
 		exit(1);
 	} else if (s->is_subsystem == SUBSYSTEM_INT_SFTP) {
@@ -1625,11 +1728,16 @@ do_child(Session *s, const char *command)
 		argv[i] = NULL;
 		optind = optreset = 1;
 		__progname = argv[0];
-#ifdef WITH_SELINUX
-		ssh_selinux_change_context("sftpd_t");
-#endif
-		exit(sftp_server_main(i, argv, s->pw));
+		exit(sftp_server_main(i, argv, s->pw, have_dev_log));
 	}
+
+	/*
+	 * Close any extra open file descriptors so that we don't have them
+	 * hanging around in clients.  Note that we want to do this after
+	 * initgroups, because at least on Solaris 2.3 it leaves file
+	 * descriptors open.
+	 */
+	closefrom(STDERR_FILENO + 1);
 
 	fflush(NULL);
 
@@ -1696,6 +1804,9 @@ session_unused(int id)
 	sessions[id].ttyfd = -1;
 	sessions[id].ptymaster = -1;
 	sessions[id].x11_chanids = NULL;
+#ifdef SSH_AUDIT_EVENTS
+	sessions[id].command_handle = -1;
+#endif
 	sessions[id].next_unused = sessions_first_unused;
 	sessions_first_unused = id;
 }
@@ -1775,6 +1886,19 @@ session_open(Authctxt *authctxt, int chanid)
 	debug("session_open: session %d: link with channel %d", s->self, chanid);
 	s->chanid = chanid;
 	return 1;
+}
+
+Session *
+session_by_id(int id)
+{
+	if (id >= 0 && id < sessions_nalloc) {
+		Session *s = &sessions[id];
+		if (s->used)
+			return s;
+	}
+	debug("%s: unknown id %d", __func__, id);
+	session_dump();
+	return NULL;
 }
 
 Session *
@@ -2290,6 +2414,32 @@ session_exit_message(Session *s, int status)
 		chan_write_failed(c);
 }
 
+#ifdef SSH_AUDIT_EVENTS
+void
+session_end_command2(Session *s)
+{
+	if (s->command != NULL) {
+		if (s->command_handle != -1)
+			audit_end_command(s->command_handle, s->command);
+		free(s->command);
+		s->command = NULL;
+		s->command_handle = -1;
+	}
+}
+
+static void
+session_end_command(Session *s)
+{
+	if (s->command != NULL) {
+		if (s->command_handle != -1)
+			PRIVSEP(audit_end_command(s->command_handle, s->command));
+		free(s->command);
+		s->command = NULL;
+		s->command_handle = -1;
+	}
+}
+#endif
+
 void
 session_close(Session *s)
 {
@@ -2304,6 +2454,10 @@ session_close(Session *s)
 
 	if (s->ttyfd != -1)
 		session_pty_cleanup(s);
+#ifdef SSH_AUDIT_EVENTS
+	if (s->command)
+		session_end_command(s);
+#endif
 	free(s->term);
 	free(s->display);
 	free(s->x11_chanids);
@@ -2457,8 +2611,9 @@ session_setup_x11fwd(Session *s)
 		return 0;
 	}
 	if (x11_create_display_inet(options.x11_display_offset,
-	    options.x11_use_localhost, s->single_connection,
-	    &s->display_number, &s->x11_chanids) == -1) {
+	    options.x11_use_localhost, options.x11_max_displays,
+	    s->single_connection, &s->display_number,
+	    &s->x11_chanids) == -1) {
 		debug("x11_create_display_inet failed.");
 		return 0;
 	}
@@ -2513,6 +2668,15 @@ do_authenticated2(Authctxt *authctxt)
 	server_loop2(authctxt);
 }
 
+static void
+do_cleanup_one_session(Session *s)
+{
+	session_pty_cleanup2(s);
+#ifdef SSH_AUDIT_EVENTS
+	session_end_command2(s);
+#endif
+}
+
 void
 do_cleanup(Authctxt *authctxt)
 {
@@ -2531,6 +2695,9 @@ do_cleanup(Authctxt *authctxt)
 
 	if (authctxt == NULL)
 		return;
+
+	free(authctxt->auth_details);
+	authctxt->auth_details = NULL;
 
 #ifdef USE_PAM
 	if (options.use_pam) {
@@ -2561,7 +2728,7 @@ do_cleanup(Authctxt *authctxt)
 	 * or if running in monitor.
 	 */
 	if (!use_privsep || mm_is_monitor())
-		session_destroy_all(session_pty_cleanup2);
+		session_destroy_all(do_cleanup_one_session);
 }
 
 /* Return a name for the remote host that fits inside utmp_size */

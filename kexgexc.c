@@ -28,6 +28,7 @@
 
 #ifdef WITH_OPENSSL
 
+#include <openssl/fips.h>
 #include <sys/types.h>
 
 #include <openssl/dh.h>
@@ -63,7 +64,7 @@ kexgex_client(struct ssh *ssh)
 
 	nbits = dh_estimate(kex->dh_need * 8);
 
-	kex->min = DH_GRP_MIN;
+	kex->min = FIPS_mode() ? DH_GRP_MIN_FIPS : DH_GRP_MIN;
 	kex->max = DH_GRP_MAX;
 	kex->nbits = nbits;
 	if (datafellows & SSH_BUG_DHGEX_LARGE)

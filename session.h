@@ -60,6 +60,12 @@ struct Session {
 		char	*name;
 		char	*val;
 	} *env;
+
+	/* exec */
+#ifdef SSH_AUDIT_EVENTS
+	int	command_handle;
+	char	*command;
+#endif
 };
 
 void	 do_authenticated(Authctxt *);
@@ -72,8 +78,10 @@ void	 session_close_by_pid(pid_t, int);
 void	 session_close_by_channel(int, void *);
 void	 session_destroy_all(void (*)(Session *));
 void	 session_pty_cleanup2(Session *);
+void	 session_end_command2(Session *);
 
 Session	*session_new(void);
+Session *session_by_id(int);
 Session	*session_by_tty(char *);
 void	 session_close(Session *);
 void	 do_setusercontext(struct passwd *);

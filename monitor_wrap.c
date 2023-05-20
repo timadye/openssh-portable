@@ -345,6 +345,25 @@ mm_inform_authserv(char *service, char *style)
 	buffer_free(&m);
 }
 
+/* Inform the privileged process about role */
+
+#ifdef WITH_SELINUX
+void
+mm_inform_authrole(char *role)
+{
+	Buffer m;
+
+	debug3("%s entering", __func__);
+
+	buffer_init(&m);
+	buffer_put_cstring(&m, role ? role : "");
+
+	mm_request_send(pmonitor->m_recvfd, MONITOR_REQ_AUTHROLE, &m);
+
+	buffer_free(&m);
+}
+#endif
+
 /* Do the password authentication */
 int
 mm_auth_password(Authctxt *authctxt, char *password)
@@ -434,7 +453,7 @@ mm_key_allowed(enum mm_keytype type, const char *user, const char *host,
  */
 
 int
-mm_key_verify(Key *key, u_char *sig, u_int siglen, u_char *data, u_int datalen)
+mm_key_verify(enum mm_keytype type, Key *key, u_char *sig, u_int siglen, u_char *data, u_int datalen)
 {
 	Buffer m;
 	u_char *blob;
@@ -448,6 +467,7 @@ mm_key_verify(Key *key, u_char *sig, u_int siglen, u_char *data, u_int datalen)
 		return (0);
 
 	buffer_init(&m);
+	buffer_put_int(&m, type);
 	buffer_put_string(&m, blob, len);
 	buffer_put_string(&m, sig, siglen);
 	buffer_put_string(&m, data, datalen);
@@ -463,6 +483,18 @@ mm_key_verify(Key *key, u_char *sig, u_int siglen, u_char *data, u_int datalen)
 	buffer_free(&m);
 
 	return (verified);
+}
+
+int
+mm_hostbased_key_verify(Key *key, u_char *sig, u_int siglen, u_char *data, u_int datalen)
+{
+	return mm_key_verify(MM_HOSTKEY, key, sig, siglen, data, datalen);
+}
+
+int
+mm_user_key_verify(Key *key, u_char *sig, u_int siglen, u_char *data, u_int datalen)
+{
+	return mm_key_verify(MM_USERKEY, key, sig, siglen, data, datalen);
 }
 
 void
@@ -493,10 +525,10 @@ mm_pty_allocate(int *ptyfd, int *ttyfd, char *namebuf, size_t namebuflen)
 	if ((tmp1 = dup(pmonitor->m_recvfd)) == -1 ||
 	    (tmp2 = dup(pmonitor->m_recvfd)) == -1) {
 		error("%s: cannot allocate fds for pty", __func__);
-		if (tmp1 > 0)
+		if (tmp1 >= 0)
 			close(tmp1);
-		if (tmp2 > 0)
-			close(tmp2);
+		/*DEAD CODE if (tmp2 >= 0)
+			close(tmp2);*/
 		return 0;
 	}
 	close(tmp1);
@@ -842,10 +874,11 @@ mm_audit_event(ssh_audit_event_t event)
 	buffer_free(&m);
 }
 
-void
+int
 mm_audit_run_command(const char *command)
 {
 	Buffer m;
+	int handle;
 
 	debug3("%s entering command %s", __func__, command);
 
@@ -853,6 +886,26 @@ mm_audit_run_command(const char *command)
 	buffer_put_cstring(&m, command);
 
 	mm_request_send(pmonitor->m_recvfd, MONITOR_REQ_AUDIT_COMMAND, &m);
+	mm_request_receive_expect(pmonitor->m_recvfd, MONITOR_ANS_AUDIT_COMMAND, &m);
+
+	handle = buffer_get_int(&m);
+	buffer_free(&m);
+
+	return (handle);
+}
+
+void
+mm_audit_end_command(int handle, const char *command)
+{
+	Buffer m;
+
+	debug3("%s entering command %s", __func__, command);
+
+	buffer_init(&m);
+	buffer_put_int(&m, handle);
+	buffer_put_cstring(&m, command);
+
+	mm_request_send(pmonitor->m_recvfd, MONITOR_REQ_AUDIT_END_COMMAND, &m);
 	buffer_free(&m);
 }
 #endif /* SSH_AUDIT_EVENTS */
@@ -924,7 +977,7 @@ mm_ssh_gssapi_checkmic(Gssctxt *ctx, gss_buffer_t gssbuf, gss_buffer_t gssmic)
 }
 
 int
-mm_ssh_gssapi_userok(char *user)
+mm_ssh_gssapi_userok(char *user, struct passwd *pw)
 {
 	Buffer m;
 	int authenticated = 0;
@@ -941,5 +994,161 @@ mm_ssh_gssapi_userok(char *user)
 	debug3("%s: user %sauthenticated",__func__, authenticated ? "" : "not ");
 	return (authenticated);
 }
+
+OM_uint32
+mm_ssh_gssapi_sign(Gssctxt *ctx, gss_buffer_desc *data, gss_buffer_desc *hash)
+{
+	Buffer m;
+	OM_uint32 major;
+	u_int len;
+
+	buffer_init(&m);
+	buffer_put_string(&m, data->value, data->length);
+
+	mm_request_send(pmonitor->m_recvfd, MONITOR_REQ_GSSSIGN, &m);
+	mm_request_receive_expect(pmonitor->m_recvfd, MONITOR_ANS_GSSSIGN, &m);
+
+	major = buffer_get_int(&m);
+	hash->value = buffer_get_string(&m, &len);
+	hash->length = len;
+
+	buffer_free(&m);
+
+	return(major);
+}
+
+int
+mm_ssh_gssapi_update_creds(ssh_gssapi_ccache *store)
+{
+	Buffer m;
+	int ok;
+
+	buffer_init(&m);
+
+	buffer_put_cstring(&m, store->filename ? store->filename : "");
+	buffer_put_cstring(&m, store->envvar ? store->envvar : "");
+	buffer_put_cstring(&m, store->envval ? store->envval : "");
+
+	mm_request_send(pmonitor->m_recvfd, MONITOR_REQ_GSSUPCREDS, &m);
+	mm_request_receive_expect(pmonitor->m_recvfd, MONITOR_ANS_GSSUPCREDS, &m);
+
+	ok = buffer_get_int(&m);
+
+	buffer_free(&m);
+
+	return (ok);
+}
+
 #endif /* GSSAPI */
 
+#ifdef SSH_AUDIT_EVENTS
+void
+mm_audit_unsupported_body(int what)
+{
+	Buffer m;
+
+	buffer_init(&m);
+	buffer_put_int(&m, what);
+
+	mm_request_send(pmonitor->m_recvfd, MONITOR_REQ_AUDIT_UNSUPPORTED, &m);
+	mm_request_receive_expect(pmonitor->m_recvfd, MONITOR_ANS_AUDIT_UNSUPPORTED,
+				  &m);
+
+	buffer_free(&m);
+}
+
+void
+mm_audit_kex_body(int ctos, char *cipher, char *mac, char *compress, char *fps, pid_t pid,
+		  uid_t uid)
+{
+	Buffer m;
+
+	buffer_init(&m);
+	buffer_put_int(&m, ctos);
+	buffer_put_cstring(&m, cipher);
+	buffer_put_cstring(&m, (mac ? mac : "<implicit>"));
+	buffer_put_cstring(&m, compress);
+	buffer_put_cstring(&m, fps);
+	buffer_put_int64(&m, pid);
+	buffer_put_int64(&m, uid);
+
+	mm_request_send(pmonitor->m_recvfd, MONITOR_REQ_AUDIT_KEX, &m);
+	mm_request_receive_expect(pmonitor->m_recvfd, MONITOR_ANS_AUDIT_KEX,
+				  &m);
+
+	buffer_free(&m);
+}
+
+void
+mm_audit_session_key_free_body(int ctos, pid_t pid, uid_t uid)
+{
+	Buffer m;
+
+	buffer_init(&m);
+	buffer_put_int(&m, ctos);
+	buffer_put_int64(&m, pid);
+	buffer_put_int64(&m, uid);
+	mm_request_send(pmonitor->m_recvfd, MONITOR_REQ_AUDIT_SESSION_KEY_FREE, &m);
+	mm_request_receive_expect(pmonitor->m_recvfd, MONITOR_ANS_AUDIT_SESSION_KEY_FREE,
+				  &m);
+	buffer_free(&m);
+}
+
+void
+mm_audit_destroy_sensitive_data(const char *fp, pid_t pid, uid_t uid)
+{
+	Buffer m;
+
+	buffer_init(&m);
+	buffer_put_cstring(&m, fp);
+	buffer_put_int64(&m, pid);
+	buffer_put_int64(&m, uid);
+
+	mm_request_send(pmonitor->m_recvfd, MONITOR_REQ_AUDIT_SERVER_KEY_FREE, &m);
+	buffer_free(&m);
+}
+
+int mm_forward_audit_messages(int fdin)
+{
+	u_char buf[4];
+	u_int blen, msg_len;
+	Buffer m;
+	int ret = 0;
+
+	debug3("%s: entering", __func__);
+	buffer_init(&m);
+	do {
+		blen = atomicio(read, fdin, buf, sizeof(buf));
+		if (blen == 0) /* closed pipe */
+			break;
+		if (blen != sizeof(buf)) {
+			error("%s: Failed to read the buffer from child", __func__);
+			ret = -1;
+			break;
+		}
+
+		msg_len = get_u32(buf);
+		if (msg_len > 256 * 1024)
+			fatal("%s: read: bad msg_len %d", __func__, msg_len);
+		buffer_clear(&m);
+		buffer_append_space(&m, msg_len);
+		if (atomicio(read, fdin, buffer_ptr(&m), msg_len) != msg_len) {
+			error("%s: Failed to read the the buffer content from the child", __func__);
+			ret = -1;
+			break;
+		}
+		if (atomicio(vwrite, pmonitor->m_recvfd, buf, blen) != blen || 
+		    atomicio(vwrite, pmonitor->m_recvfd, buffer_ptr(&m), msg_len) != msg_len) {
+			error("%s: Failed to write the message to the monitor", __func__);
+			ret = -1;
+			break;
+		}
+	} while (1);
+	buffer_free(&m);
+	return ret;
+}
+void mm_set_monitor_pipe(int fd)
+{
+	pmonitor->m_recvfd = fd;
+}
+#endif /* SSH_AUDIT_EVENTS */

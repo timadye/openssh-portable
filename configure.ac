@@ -623,6 +623,30 @@ main() { if (NSVersionOfRunTimeLibrary("System") >= (60 << 16))
 	    [Use tunnel device compatibility to OpenBSD])
 	AC_DEFINE([SSH_TUN_PREPEND_AF], [1],
 	    [Prepend the address family to IP tunnel traffic])
+	AC_MSG_CHECKING(if we have the Security Authorization Session API)
+	AC_TRY_COMPILE([#include <Security/AuthSession.h>],
+		[SessionCreate(0, 0);],
+		[ac_cv_use_security_session_api="yes"
+		 AC_DEFINE(USE_SECURITY_SESSION_API, 1, 
+			[platform has the Security Authorization Session API])
+		 LIBS="$LIBS -framework Security"
+		 AC_MSG_RESULT(yes)],
+		[ac_cv_use_security_session_api="no"
+		 AC_MSG_RESULT(no)])
+	AC_MSG_CHECKING(if we have an in-memory credentials cache)
+	AC_TRY_COMPILE(
+		[#include <Kerberos/Kerberos.h>],
+		[cc_context_t c;
+		 (void) cc_initialize (&c, 0, NULL, NULL);],
+		[AC_DEFINE(USE_CCAPI, 1, 
+			[platform uses an in-memory credentials cache])
+		 LIBS="$LIBS -framework Security"
+		 AC_MSG_RESULT(yes)
+		 if test "x$ac_cv_use_security_session_api" = "xno"; then
+			AC_MSG_ERROR(*** Need a security framework to use the credentials cache API ***)
+		fi],
+		[AC_MSG_RESULT(no)]
+	)
 	m4_pattern_allow([AU_IPv])
 	AC_CHECK_DECL([AU_IPv4], [],
 	    AC_DEFINE([AU_IPv4], [0], [System only supports IPv4 audit records])
@@ -1467,6 +1491,62 @@ AC_ARG_WITH([skey],
 	]
 )
 
+# Check whether user wants TCP wrappers support
+TCPW_MSG="no"
+AC_ARG_WITH([tcp-wrappers],
+	[  --with-tcp-wrappers[[=PATH]] Enable tcpwrappers support (optionally in PATH)],
+	[
+		if test "x$withval" != "xno" ; then
+			saved_LIBS="$LIBS"
+			saved_LDFLAGS="$LDFLAGS"
+			saved_CPPFLAGS="$CPPFLAGS"
+			if test -n "${withval}" && \
+			    test "x${withval}" != "xyes"; then
+				if test -d "${withval}/lib"; then
+					if test -n "${need_dash_r}"; then
+						LDFLAGS="-L${withval}/lib -R${withval}/lib ${LDFLAGS}"
+					else
+						LDFLAGS="-L${withval}/lib ${LDFLAGS}"
+					fi
+				else
+					if test -n "${need_dash_r}"; then
+						LDFLAGS="-L${withval} -R${withval} ${LDFLAGS}"
+					else
+						LDFLAGS="-L${withval} ${LDFLAGS}"
+					fi
+				fi
+				if test -d "${withval}/include"; then
+					CPPFLAGS="-I${withval}/include ${CPPFLAGS}"
+				else
+					CPPFLAGS="-I${withval} ${CPPFLAGS}"
+				fi
+			fi
+			LIBS="-lwrap $LIBS"
+			AC_MSG_CHECKING([for libwrap])
+			AC_LINK_IFELSE([AC_LANG_PROGRAM([[
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <tcpd.h>
+int deny_severity = 0, allow_severity = 0;
+				]], [[
+	hosts_access(0);
+				]])], [
+					AC_MSG_RESULT([yes])
+					AC_DEFINE([LIBWRAP], [1],
+						[Define if you want
+						TCP Wrappers support])
+					SSHDLIBS="$SSHDLIBS -lwrap"
+					TCPW_MSG="yes"
+				], [
+					AC_MSG_ERROR([*** libwrap missing])
+				
+			])
+			LIBS="$saved_LIBS"
+		fi
+	]
+)
+
 # Check whether user wants to use ldns
 LDNS_MSG="no"
 AC_ARG_WITH(ldns,
@@ -1655,6 +1735,106 @@ if test "x$use_pie" != "xno"; then
 		LDFLAGS="$SAVED_LDFLAGS"
 	fi
 fi
+
+# Check whether user wants LDAP support
+LDAP_MSG="no"
+INSTALL_SSH_LDAP_HELPER=""
+AC_ARG_WITH(ldap,
+	[  --with-ldap[[=PATH]]      Enable LDAP pubkey support (optionally in PATH)],
+	[
+		if test "x$withval" != "xno" ; then
+
+			INSTALL_SSH_LDAP_HELPER="yes"
+			CPPFLAGS="$CPPFLAGS -DLDAP_DEPRECATED"
+
+			if test "x$withval" != "xyes" ; then
+				CPPFLAGS="$CPPFLAGS -I${withval}/include"
+				LDFLAGS="$LDFLAGS -L${withval}/lib"
+			fi
+
+			AC_DEFINE([WITH_LDAP_PUBKEY], 1, [Enable LDAP pubkey support])
+			LDAP_MSG="yes"
+
+			AC_CHECK_HEADERS(lber.h)
+			AC_CHECK_HEADERS(ldap.h, , AC_MSG_ERROR(could not locate <ldap.h>))
+			AC_CHECK_HEADERS(ldap_ssl.h)
+
+			AC_ARG_WITH(ldap-lib,
+				[  --with-ldap-lib=type    select ldap library [auto|netscape5|netscape4|netscape3|umich|openldap]])
+
+			if test -z "$with_ldap_lib"; then
+				with_ldap_lib=auto
+			fi
+
+			if test -z "$found_ldap_lib" -a \( $with_ldap_lib = auto -o $with_ldap_lib = umich -o $with_ldap_lib = openldap \); then
+				AC_CHECK_LIB(lber, main, LIBS="-llber $LIBS" found_ldap_lib=yes)
+				AC_CHECK_LIB(ldap, main, LIBS="-lldap $LIBS" found_ldap_lib=yes)
+			fi
+
+			if test -z "$found_ldap_lib" -a \( $with_ldap_lib = auto -o $with_ldap_lib = netscape5 \); then
+				AC_CHECK_LIB(ldap50, main, LIBS="-lldap50 -lssldap50 -lssl3 -lnss3 -lnspr4 -lprldap50 -lplc4 -lplds4 $LIBS" found_ldap_lib=yes)
+			fi
+
+			if test -z "$found_ldap_lib" -a \( $with_ldap_lib = auto -o $with_ldap_lib = netscape4 \); then
+				AC_CHECK_LIB(ldapssl41, main, LIBS="-lldapssl41 -lplc3 -lplds3 -lnspr3 $LIBS" found_ldap_lib=yes)
+				if test -z "$found_ldap_lib"; then
+					AC_CHECK_LIB(ldapssl40, main, LIBS="-lldapssl40 $LIBS" found_ldap_lib=yes)
+				fi
+				if test -z "$found_ldap_lib"; then
+					AC_CHECK_LIB(ldap41, main, LIBS="-lldap41 $LIBS" found_ldap_lib=yes)
+				fi
+				if test -z "$found_ldap_lib"; then
+					AC_CHECK_LIB(ldap40, main, LIBS="-lldap40 $LIBS" found_ldap_lib=yes)
+				fi
+			fi
+
+			if test -z "$found_ldap_lib" -a \( $with_ldap_lib = auto -o $with_ldap_lib = netscape3 \); then
+				AC_CHECK_LIB(ldapssl30, main, LIBS="-lldapssl30 $LIBS" found_ldap_lib=yes)
+			fi
+
+			if test -z "$found_ldap_lib"; then
+				AC_MSG_ERROR(could not locate a valid LDAP library)
+			fi
+
+			AC_MSG_CHECKING([for working LDAP support])
+			AC_TRY_COMPILE(
+				[#include <sys/types.h>
+				 #include <ldap.h>],
+				[(void)ldap_init(0, 0);],
+				[AC_MSG_RESULT(yes)],
+				[
+				    AC_MSG_RESULT(no) 
+					AC_MSG_ERROR([** Incomplete or missing ldap libraries **])
+				])
+			AC_CHECK_FUNCS( \
+				ldap_init \
+				ldap_get_lderrno \
+				ldap_set_lderrno \
+				ldap_parse_result \
+				ldap_memfree \
+				ldap_controls_free \
+				ldap_set_option \
+				ldap_get_option \
+				ldapssl_init \
+				ldap_start_tls_s \
+				ldap_pvt_tls_set_option \
+				ldap_initialize \
+			)
+			AC_CHECK_FUNCS(ldap_set_rebind_proc,
+				AC_MSG_CHECKING([number arguments of ldap_set_rebind_proc])
+				AC_TRY_COMPILE(
+					[#include <lber.h>
+					#include <ldap.h>],
+					[ldap_set_rebind_proc(0, 0, 0);],
+					[ac_cv_ldap_set_rebind_proc=3],
+					[ac_cv_ldap_set_rebind_proc=2])
+				AC_MSG_RESULT($ac_cv_ldap_set_rebind_proc)
+				AC_DEFINE(LDAP_SET_REBIND_PROC_ARGS, $ac_cv_ldap_set_rebind_proc, [number arguments of ldap_set_rebind_proc])
+			)
+		fi
+	]
+)
+AC_SUBST(INSTALL_SSH_LDAP_HELPER)
 
 dnl    Checks for library functions. Please keep in alphabetical order
 AC_CHECK_FUNCS([ \
@@ -3029,6 +3209,7 @@ AC_ARG_WITH([pam],
 			PAM_MSG="yes"
 
 			SSHDLIBS="$SSHDLIBS -lpam"
+			KEYCATLIBS="$KEYCATLIBS -lpam"
 			AC_DEFINE([USE_PAM], [1],
 				[Define if you want to enable PAM support])
 
@@ -3039,6 +3220,7 @@ AC_ARG_WITH([pam],
 					;;
 				*)
 					SSHDLIBS="$SSHDLIBS -ldl"
+					KEYCATLIBS="$KEYCATLIBS -ldl"
 					;;
 				esac
 			fi
@@ -4155,6 +4337,7 @@ AC_ARG_WITH([selinux],
 )
 AC_SUBST([SSHLIBS])
 AC_SUBST([SSHDLIBS])
+AC_SUBST([KEYCATLIBS])
 
 # Check whether user wants Kerberos 5 support
 KRB5_MSG="no"
@@ -4283,6 +4466,30 @@ AC_ARG_WITH([kerberos5],
 )
 AC_SUBST([GSSLIBS])
 AC_SUBST([K5LIBS])
+
+# Check whether user wants systemd support
+SYSTEMD_MSG="no"
+AC_ARG_WITH(systemd,
+	[  --with-systemd          Enable systemd support],
+	[ if test "x$withval" != "xno" ; then
+		AC_PATH_TOOL([PKGCONFIG], [pkg-config], [no])
+		if test "$PKGCONFIG" != "no"; then
+			AC_MSG_CHECKING([for libsystemd])
+			if $PKGCONFIG --exists libsystemd; then
+				SYSTEMD_CFLAGS=`$PKGCONFIG --cflags libsystemd`
+				SYSTEMD_LIBS=`$PKGCONFIG --libs libsystemd`
+				CPPFLAGS="$CPPFLAGS $SYSTEMD_CFLAGS"
+				SSHDLIBS="$SSHDLIBS $SYSTEMD_LIBS"
+				AC_MSG_RESULT([yes])
+				AC_DEFINE(HAVE_SYSTEMD, 1, [Define if you want systemd support.])
+				SYSTEMD_MSG="yes"
+			else
+				AC_MSG_RESULT([no])
+			fi
+		fi
+	fi ]
+)
+
 
 # Looking for programs, paths and files
 
@@ -4827,6 +5034,12 @@ AC_ARG_WITH([lastlog],
 		fi
 	]
 )
+AC_ARG_ENABLE(vendor-patchlevel,
+  [  --enable-vendor-patchlevel=TAG  specify a vendor patch level],
+  [AC_DEFINE_UNQUOTED(SSH_VENDOR_PATCHLEVEL,[SSH_RELEASE "-" "$enableval"],[Define to your vendor patch level, if it has been modified from the upstream source release.])
+   SSH_VENDOR_PATCHLEVEL="$enableval"],
+  [AC_DEFINE(SSH_VENDOR_PATCHLEVEL,SSH_RELEASE,[Define to your vendor patch level, if it has been modified from the upstream source release.])
+   SSH_VENDOR_PATCHLEVEL=none])
 
 dnl lastlog, [uw]tmpx? detection
 dnl  NOTE: set the paths in the platform section to avoid the
@@ -5081,16 +5294,19 @@ echo "                 KerberosV support: $KRB5_MSG"
 echo "                   SELinux support: $SELINUX_MSG"
 echo "                 Smartcard support: $SCARD_MSG"
 echo "                     S/KEY support: $SKEY_MSG"
+echo "              TCP Wrappers support: $TCPW_MSG"
 echo "              MD5 password support: $MD5_MSG"
 echo "                   libedit support: $LIBEDIT_MSG"
 echo "  Solaris process contract support: $SPC_MSG"
 echo "           Solaris project support: $SP_MSG"
 echo "         Solaris privilege support: $SPP_MSG"
+echo "                   systemd support: $SYSTEMD_MSG"
 echo "       IP address in \$DISPLAY hack: $DISPLAY_HACK_MSG"
 echo "           Translate v4 in v6 hack: $IPV4_IN6_HACK_MSG"
 echo "                  BSD Auth support: $BSD_AUTH_MSG"
 echo "              Random number source: $RAND_MSG"
 echo "             Privsep sandbox style: $SANDBOX_STYLE"
+echo "                Vendor patch level: $SSH_VENDOR_PATCHLEVEL"
 
 echo ""
 
@@ -5105,6 +5321,9 @@ echo "         +for sshd: ${SSHDLIBS}"
 fi
 if test ! -z "${SSHLIBS}"; then
 echo "          +for ssh: ${SSHLIBS}"
+fi
+if test ! -z "${KEYCATLIBS}"; then
+echo "   +for ssh-keycat: ${KEYCATLIBS}"
 fi
 
 echo ""

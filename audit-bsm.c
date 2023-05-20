@@ -373,10 +373,23 @@ audit_connection_from(const char *host, int port)
 #endif
 }
 
-void
+int
 audit_run_command(const char *command)
 {
 	/* not implemented */
+	return 0;
+}
+
+void
+audit_end_command(int handle, const char *command)
+{
+	/* not implemented */
+}
+
+void
+audit_count_session_open(void)
+{
+	/* not necessary */
 }
 
 void
@@ -387,6 +400,12 @@ audit_session_open(struct logininfo *li)
 
 void
 audit_session_close(struct logininfo *li)
+{
+	/* not implemented */
+}
+
+int
+audit_keyusage(int host_user, const char *type, unsigned bits, char *fp, int rv)
 {
 	/* not implemented */
 }
@@ -451,5 +470,41 @@ audit_event(ssh_audit_event_t event)
 	default:
 		debug("%s: unhandled event %d", __func__, event);
 	}
+}
+
+void
+audit_unsupported_body(int what)
+{
+	/* not implemented */
+}
+
+void
+audit_kex_body(int ctos, char *enc, char *mac, char *compress, char *pfs, pid_t pid, uid_t uid)
+{
+	/* not implemented */
+}
+
+void
+audit_session_key_free_body(int ctos, pid_t pid, uid_t uid)
+{
+	/* not implemented */
+}
+
+void
+audit_destroy_sensitive_data(const char *fp)
+{
+	/* not implemented */
+}
+
+void
+audit_destroy_sensitive_data(const char *fp, pid_t pid, uid_t uid)
+{
+	/* not implemented */
+}
+
+void
+audit_generate_ephemeral_server_key(const char *fp)
+{
+	/* not implemented */
 }
 #endif /* BSM */

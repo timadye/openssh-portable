@@ -99,6 +99,11 @@ enum kex_exchange {
 	KEX_DH_GEX_SHA256,
 	KEX_ECDH_SHA2,
 	KEX_C25519_SHA256,
+#ifdef GSSAPI
+	KEX_GSS_GRP1_SHA1,
+	KEX_GSS_GRP14_SHA1,
+	KEX_GSS_GEX_SHA1,
+#endif
 	KEX_MAX
 };
 
@@ -147,6 +152,12 @@ struct kex {
 	u_int	flags;
 	int	hash_alg;
 	int	ec_nid;
+#ifdef GSSAPI
+	int	gss_deleg_creds;
+	int	gss_trust_dns;
+	char    *gss_host;
+	char	*gss_client;
+#endif
 	char	*client_version_string;
 	char	*server_version_string;
 	char	*failed_choice;
@@ -170,6 +181,7 @@ int	 kex_names_valid(const char *);
 char	*kex_alg_list(char);
 char	*kex_names_cat(const char *, const char *);
 int	 kex_assemble_names(const char *, char **);
+int	 gss_kex_names_valid(const char *);
 
 int	 kex_new(struct ssh *, char *[PROPOSAL_MAX], struct kex **);
 int	 kex_setup(struct ssh *, char *[PROPOSAL_MAX]);
@@ -196,6 +208,12 @@ int	 kexecdh_client(struct ssh *);
 int	 kexecdh_server(struct ssh *);
 int	 kexc25519_client(struct ssh *);
 int	 kexc25519_server(struct ssh *);
+#ifdef GSSAPI
+int	 kexgss_client(struct ssh *);
+int	 kexgss_server(struct ssh *);
+#endif
+
+void	newkeys_destroy(struct newkeys *newkeys);
 
 int	 kex_dh_hash(int, const char *, const char *,
     const u_char *, size_t, const u_char *, size_t, const u_char *, size_t,

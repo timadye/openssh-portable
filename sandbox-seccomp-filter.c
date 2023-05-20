@@ -50,6 +50,9 @@
 #include <elf.h>
 
 #include <asm/unistd.h>
+#ifdef __s390__
+#include <asm/zcrypt.h>
+#endif
 
 #include <errno.h>
 #include <signal.h>
@@ -73,6 +76,16 @@
 # define SECCOMP_FILTER_FAIL SECCOMP_RET_TRAP
 #endif /* SANDBOX_SECCOMP_FILTER_DEBUG */
 
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+# define ARG_LO_OFFSET  0
+# define ARG_HI_OFFSET  sizeof(uint32_t)
+#elif __BYTE_ORDER == __BIG_ENDIAN
+# define ARG_LO_OFFSET  sizeof(uint32_t)
+# define ARG_HI_OFFSET  0
+#else
+#error "Unknown endianness"
+#endif
+
 /* Simple helpers to avoid manual errors (but larger BPF programs). */
 #define SC_DENY(_nr, _errno) \
 	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, __NR_ ## _nr, 0, 1), \
@@ -81,11 +94,17 @@
 	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, __NR_ ## _nr, 0, 1), \
 	BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_ALLOW)
 #define SC_ALLOW_ARG(_nr, _arg_nr, _arg_val) \
-	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, __NR_ ## _nr, 0, 4), \
-	/* load first syscall argument */ \
+	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, __NR_ ## _nr, 0, 6), \
+	/* load and test first syscall argument, low word */ \
 	BPF_STMT(BPF_LD+BPF_W+BPF_ABS, \
-	    offsetof(struct seccomp_data, args[(_arg_nr)])), \
-	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (_arg_val), 0, 1), \
+	    offsetof(struct seccomp_data, args[(_arg_nr)]) + ARG_LO_OFFSET), \
+	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, \
+	    ((_arg_val) & 0xFFFFFFFF), 0, 3), \
+	/* load and test first syscall argument, high word */ \
+	BPF_STMT(BPF_LD+BPF_W+BPF_ABS, \
+	    offsetof(struct seccomp_data, args[(_arg_nr)]) + ARG_HI_OFFSET), \
+	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, \
+	    (((uint32_t)((uint64_t)(_arg_val) >> 32)) & 0xFFFFFFFF), 0, 1), \
 	BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_ALLOW), \
 	/* reload syscall number; all rules expect it in accumulator */ \
 	BPF_STMT(BPF_LD+BPF_W+BPF_ABS, \
@@ -118,6 +137,9 @@ static const struct sock_filter preauth_insns[] = {
 #ifdef __NR_open
 	SC_DENY(open, EACCES),
 #endif
+#ifdef __NR_socket
+	SC_DENY(socket, EACCES),
+#endif
 #ifdef __NR_openat
 	SC_DENY(openat, EACCES),
 #endif
@@ -147,17 +169,35 @@ static const struct sock_filter preauth_insns[] = {
 #ifdef __NR_exit_group
 	SC_ALLOW(exit_group),
 #endif
+#if defined(__NR_flock) && defined(__s390__)
+	SC_ALLOW(flock),
+#endif
 #ifdef __NR_getpgid
 	SC_ALLOW(getpgid),
 #endif
 #ifdef __NR_getpid
 	SC_ALLOW(getpid),
 #endif
+#ifdef __NR_getuid
+	SC_ALLOW(getuid),
+#endif
+#ifdef __NR_getuid32
+	SC_ALLOW(getuid32),
+#endif
+#ifdef __NR_geteuid
+	SC_ALLOW(geteuid),
+#endif
+#ifdef __NR_geteuid32
+	SC_ALLOW(geteuid32),
+#endif
 #ifdef __NR_getrandom
 	SC_ALLOW(getrandom),
 #endif
 #ifdef __NR_gettimeofday
 	SC_ALLOW(gettimeofday),
+#endif
+#if defined(__NR_ipc) && defined(__s390__)
+	SC_ALLOW(ipc),
 #endif
 #ifdef __NR_madvise
 	SC_ALLOW(madvise),
@@ -206,7 +246,16 @@ static const struct sock_filter preauth_insns[] = {
 #endif
 #ifdef __NR_socketcall
 	SC_ALLOW_ARG(socketcall, 0, SYS_SHUTDOWN),
+	SC_DENY(socketcall, EACCES),
 #endif
+#if defined(__NR_ioctl) && defined(__s390__)
+	/* Allow ioctls for ICA crypto card on s390 */
+	SC_ALLOW_ARG(ioctl, 1, Z90STAT_STATUS_MASK),
+	SC_ALLOW_ARG(ioctl, 1, ICARSAMODEXPO),
+	SC_ALLOW_ARG(ioctl, 1, ICARSACRT),
+	/* Allow ioctls for EP11 crypto card on s390 */
+	SC_ALLOW_ARG(ioctl, 1, ZSENDEP11CPRB),
+#endif /* defined(__NR_ioctl) && defined(__s390__) */
 
 	/* Default deny */
 	BPF_STMT(BPF_RET+BPF_K, SECCOMP_FILTER_FAIL),

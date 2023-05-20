@@ -1089,7 +1089,7 @@ ssh_krl_from_blob(struct sshbuf *buf, struct ssh_krl **krlp,
 			break;
 		case KRL_SECTION_SIGNATURE:
 			/* Handled above, but still need to stay in synch */
-			sshbuf_reset(sect);
+			sshbuf_free(sect);
 			sect = NULL;
 			if ((r = sshbuf_skip_string(copy)) != 0)
 				goto out;
@@ -1288,7 +1288,8 @@ ssh_krl_file_contains_key(const char *path, const struct sshkey *key)
 	debug2("%s: checking KRL %s", __func__, path);
 	r = ssh_krl_check_key(krl, key);
  out:
-	close(fd);
+	if (fd != -1)
+		close(fd);
 	sshbuf_free(krlbuf);
 	ssh_krl_free(krl);
 	if (r != 0)

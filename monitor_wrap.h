@@ -42,6 +42,9 @@ int mm_is_monitor(void);
 DH *mm_choose_dh(int, int, int);
 int mm_key_sign(Key *, u_char **, u_int *, const u_char *, u_int, const char *);
 void mm_inform_authserv(char *, char *);
+#ifdef WITH_SELINUX
+void mm_inform_authrole(char *);
+#endif
 struct passwd *mm_getpwnamallow(const char *);
 char *mm_auth2_read_banner(void);
 int mm_auth_password(struct Authctxt *, char *);
@@ -49,14 +52,17 @@ int mm_key_allowed(enum mm_keytype, const char *, const char *, Key *, int);
 int mm_user_key_allowed(struct passwd *, Key *, int);
 int mm_hostbased_key_allowed(struct passwd *, const char *,
     const char *, Key *);
-int mm_key_verify(Key *, u_char *, u_int, u_char *, u_int);
+int mm_hostbased_key_verify(Key *, u_char *, u_int, u_char *, u_int);
+int mm_user_key_verify(Key *, u_char *, u_int, u_char *, u_int);
 
 #ifdef GSSAPI
 OM_uint32 mm_ssh_gssapi_server_ctx(Gssctxt **, gss_OID);
 OM_uint32 mm_ssh_gssapi_accept_ctx(Gssctxt *,
    gss_buffer_desc *, gss_buffer_desc *, OM_uint32 *);
-int mm_ssh_gssapi_userok(char *user);
+int mm_ssh_gssapi_userok(char *user, struct passwd *);
 OM_uint32 mm_ssh_gssapi_checkmic(Gssctxt *, gss_buffer_t, gss_buffer_t);
+OM_uint32 mm_ssh_gssapi_sign(Gssctxt *, gss_buffer_t, gss_buffer_t);
+int mm_ssh_gssapi_update_creds(ssh_gssapi_ccache *);
 #endif
 
 #ifdef USE_PAM
@@ -71,7 +77,14 @@ void mm_sshpam_free_ctx(void *);
 #ifdef SSH_AUDIT_EVENTS
 #include "audit.h"
 void mm_audit_event(ssh_audit_event_t);
-void mm_audit_run_command(const char *);
+int mm_audit_run_command(const char *);
+void mm_audit_end_command(int, const char *);
+void mm_audit_unsupported_body(int);
+void mm_audit_kex_body(int, char *, char *, char *, char *, pid_t, uid_t);
+void mm_audit_session_key_free_body(int, pid_t, uid_t);
+void mm_audit_destroy_sensitive_data(const char *, pid_t, uid_t);
+int mm_forward_audit_messages(int);
+void mm_set_monitor_pipe(int);
 #endif
 
 struct Session;

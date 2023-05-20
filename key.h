@@ -50,6 +50,7 @@ typedef struct sshkey Key;
 #define key_ecdsa_bits_to_nid	sshkey_ecdsa_bits_to_nid
 #define key_ecdsa_key_to_nid	sshkey_ecdsa_key_to_nid
 #define key_is_cert		sshkey_is_cert
+#define key_is_private		sshkey_is_private
 #define key_type_plain		sshkey_type_plain
 #define key_curve_name_to_nid	sshkey_curve_name_to_nid
 #define key_curve_nid_to_bits	sshkey_curve_nid_to_bits

@@ -217,6 +217,9 @@ seed_rng(void)
 		fatal("OpenSSL version mismatch. Built against %lx, you "
 		    "have %lx", (u_long)OPENSSL_VERSION_NUMBER, SSLeay());
 
+	/* clean the PRNG status when exiting the program */
+	atexit(RAND_cleanup);
+
 #ifndef OPENSSL_PRNG_ONLY
 	if (RAND_status() == 1) {
 		debug3("RNG is ready, skipping seeding");
@@ -229,6 +232,9 @@ seed_rng(void)
 	memset(buf, '\0', sizeof(buf));
 
 #endif /* OPENSSL_PRNG_ONLY */
+#ifdef __linux__
+	linux_seed();
+#endif /* __linux__ */
 	if (RAND_status() != 1)
 		fatal("PRNG is not seeded");
 }
