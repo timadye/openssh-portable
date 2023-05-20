@@ -662,7 +662,7 @@ ssh_set_variable(int sock, const char *var, u_int lvar, const char *val, u_int l
 	buffer_put_char(&msg, SSH_AGENTC_SET_VARIABLE);
   buffer_put_string(&msg, var, lvar);
   buffer_put_string(&msg, val, lval);
-	if (ssh_request_reply(sock, &msg, &msg) == 0) {
+	if (ssh_request_reply(sock, &msg, &msg) != 0) {
 		buffer_free(&msg);
 		return 0;
 	}
@@ -685,7 +685,7 @@ ssh_get_variable(int sock, const char *var, u_int lvar, char **valp, u_int *lval
 	buffer_init(&msg);
 	buffer_put_char(&msg, SSH_AGENTC_GET_VARIABLE);
   buffer_put_string(&msg, var, lvar);
-	if (ssh_request_reply(sock, &msg, &msg) == 0) {
+	if (ssh_request_reply(sock, &msg, &msg) != 0) {
 		buffer_free(&msg);
 		return 0;
 	}
@@ -725,7 +725,7 @@ ssh_get_num_variables(int sock, const char *prefix, u_int lprefix, char full, Bu
   buffer_put_string(&request, prefix, lprefix);
 
 	buffer_init(identities);
-	if (ssh_request_reply(sock, &request, identities) == 0) {
+	if (ssh_request_reply(sock, &request, identities) != 0) {
 		buffer_free(&request);
 		return 0;
 	}
@@ -794,7 +794,7 @@ ssh_delete_variable(int sock, const char *var, u_int lvar, char all)
 	buffer_init(&msg);
 	buffer_put_char(&msg, all ? SSH_AGENTC_REMOVE_ALL_VARIABLES : SSH_AGENTC_REMOVE_VARIABLE);
   buffer_put_string(&msg, var, lvar);
-	if (ssh_request_reply(sock, &msg, &msg) == 0) {
+	if (ssh_request_reply(sock, &msg, &msg) != 0) {
 		buffer_free(&msg);
 		return 0;
 	}
