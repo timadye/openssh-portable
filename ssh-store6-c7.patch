@@ -6,7 +6,7 @@ client - useful if scp/sftp use the system default ssh).
 
 With CentOS7 rpm, openssh-7.4p1-22.el7_9.src.rpm, it should be possible to
 build with static SSL libraries, if openssl-static rpm has been installed using:
-  rpm -ba|--rebuild --define "static_openssl 1"
+  rpm -ba --define "static_openssl 1" SPECS/openssh.spec
 
 Alternatively, on Linux, to make executables with static SSL libraries (libcrypto, in openssl-static rpm),
 make with:
@@ -269,10 +269,16 @@ index 4b417e3f..ded89f9f 100644
 +
  #endif				/* AUTHFD_H */
 diff --git a/Makefile.in b/Makefile.in
-index 3fde2360..f60daa26 100644
+index 3fde2360..5d403265 100644
 --- a/Makefile.in
 +++ b/Makefile.in
-@@ -69,7 +69,7 @@ EXEEXT=@EXEEXT@
+@@ -64,12 +64,12 @@ PERL=@PERL@
+ SED=@SED@
+ ENT=@ENT@
+ XAUTH_PATH=@XAUTH_PATH@
+-LDFLAGS=-L. -Lopenbsd-compat/ @LDFLAGS@
++LDFLAGS=-L. -Lopenbsd-compat/ @LDFLAGS@ -Wl,--as-needed
+ EXEEXT=@EXEEXT@
  MANFMT=@MANFMT@
  INSTALL_SSH_LDAP_HELPER=@INSTALL_SSH_LDAP_HELPER@
  
@@ -281,16 +287,20 @@ index 3fde2360..f60daa26 100644
  
  LIBOPENSSH_OBJS=\
  	ssh_api.o \
-@@ -180,6 +180,9 @@ scp$(EXEEXT): $(LIBCOMPAT) libssh.a scp.o progressmeter.o
+@@ -180,8 +180,11 @@ scp$(EXEEXT): $(LIBCOMPAT) libssh.a scp.o progressmeter.o
  ssh-add$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-add.o
  	$(LD) -o $@ ssh-add.o $(LDFLAGS) -lssh -lopenbsd-compat -lfipscheck $(LIBS)
  
+-ssh-agent$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-agent.o ssh-pkcs11-client.o
+-	$(LD) -o $@ ssh-agent.o ssh-pkcs11-client.o $(LDFLAGS) -lssh -lopenbsd-compat -lfipscheck $(LIBS)
 +ssh-store$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-store.o
 +	$(LD) -o $@ ssh-store.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
 +
- ssh-agent$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-agent.o ssh-pkcs11-client.o
- 	$(LD) -o $@ ssh-agent.o ssh-pkcs11-client.o $(LDFLAGS) -lssh -lopenbsd-compat -lfipscheck $(LIBS)
++ssh-agent$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-agent.o
++	$(LD) -o $@ ssh-agent.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
  
+ ssh-keygen$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-keygen.o
+ 	$(LD) -o $@ ssh-keygen.o $(LDFLAGS) -lssh -lopenbsd-compat -lfipscheck $(LIBS)
 @@ -336,6 +339,7 @@ install-files:
  	$(INSTALL) -m 0755 $(STRIP_OPT) ssh$(EXEEXT) $(DESTDIR)$(bindir)/ssh$(EXEEXT)
  	$(INSTALL) -m 0755 $(STRIP_OPT) scp$(EXEEXT) $(DESTDIR)$(bindir)/scp$(EXEEXT)
