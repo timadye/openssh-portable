@@ -6,7 +6,7 @@ client - useful if scp/sftp use the system default ssh).
 
 With CentOS7 rpm, openssh-7.4p1-22.el7_9.src.rpm, it should be possible to
 build with static SSL libraries, if openssl-static rpm has been installed using:
-  rpm -ba|--rebuild --define "static_openssl 1"
+  rpm -ba --define "static_openssl 1" SPECS/openssh.spec
 
 Alternatively, on Linux, to make executables with static SSL libraries (libcrypto, in openssl-static rpm),
 make with:
