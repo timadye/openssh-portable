@@ -64,7 +64,7 @@ PERL=@PERL@
 SED=@SED@
 ENT=@ENT@
 XAUTH_PATH=@XAUTH_PATH@
-LDFLAGS=-L. -Lopenbsd-compat/ @LDFLAGS@
+LDFLAGS=-L. -Lopenbsd-compat/ @LDFLAGS@ -Wl,--as-needed
 EXEEXT=@EXEEXT@
 MANFMT=@MANFMT@
 INSTALL_SSH_LDAP_HELPER=@INSTALL_SSH_LDAP_HELPER@
@@ -183,8 +183,8 @@ ssh-add$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-add.o
 ssh-store$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-store.o
 	$(LD) -o $@ ssh-store.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
 
-ssh-agent$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-agent.o ssh-pkcs11-client.o
-	$(LD) -o $@ ssh-agent.o ssh-pkcs11-client.o $(LDFLAGS) -lssh -lopenbsd-compat -lfipscheck $(LIBS)
+ssh-agent$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-agent.o
+	$(LD) -o $@ ssh-agent.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
 
 ssh-keygen$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-keygen.o
 	$(LD) -o $@ ssh-keygen.o $(LDFLAGS) -lssh -lopenbsd-compat -lfipscheck $(LIBS)
