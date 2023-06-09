@@ -55,7 +55,6 @@
 
 #include "xmalloc.h"
 #include "ssh.h"
-#include "rsa.h"
 #include "log.h"
 #include "sshkey.h"
 #include "sshbuf.h"
@@ -162,7 +161,6 @@ main(int argc, char **argv)
   int agent_fd;
   int r, ch, set = 0, get = 0, list = 0, delete = 0, ret = 0;
 
-  ssh_malloc_init();  /* must be called before any mallocs */
   /* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
   sanitise_stdfd();
 
