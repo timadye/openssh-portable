@@ -107,6 +107,7 @@ int	ssh_agent_sign(int sock, const struct sshkey *key,
 #define	SSH_AGENT_RSA_SHA2_256			0x02
 #define	SSH_AGENT_RSA_SHA2_512			0x04
 
+typedef struct sshbuf Buffer;
 int
 ssh_set_variable(int, const char *, u_int, const char *, u_int);
 int
