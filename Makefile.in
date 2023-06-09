@@ -84,6 +84,8 @@ LIBOPENSSH_OBJS=\
 	ssh_api.o \
 	ssherr.o \
 	sshbuf.o \
+	buffer.o \
+	bufaux.o \
 	sshkey.o \
 	sshbuf-getput-basic.o \
 	sshbuf-misc.o \
@@ -138,6 +140,8 @@ SFTP_CLIENT_OBJS=sftp-common.o sftp-client.o sftp-glob.o
 SCP_OBJS=	scp.o progressmeter.o $(SFTP_CLIENT_OBJS)
 
 SSHADD_OBJS=	ssh-add.o $(SKOBJS)
+
+SSHSTORE_OBJS=	ssh-store.o $(SKOBJS)
 
 SSHAGENT_OBJS=	ssh-agent.o ssh-pkcs11-client.o $(SKOBJS)
 
@@ -215,8 +219,8 @@ scp$(EXEEXT): $(LIBCOMPAT) libssh.a $(SCP_OBJS)
 ssh-add$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHADD_OBJS)
 	$(LD) -o $@ $(SSHADD_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS) $(CHANNELLIBS)
 
-ssh-store$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-store.o
-	$(LD) -o $@ ssh-store.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS) $(CHANNELLIBS)
+ssh-store$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHSTORE_OBJS)
+	$(LD) -o $@ $(SSHSTORE_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS) $(CHANNELLIBS)
 
 ssh-agent$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHAGENT_OBJS)
 	$(LD) -o $@ $(SSHAGENT_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS) $(CHANNELLIBS)
