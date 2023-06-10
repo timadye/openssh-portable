@@ -1,4 +1,4 @@
-Apply this patch to OpenSSH 7.4p1 and build as normal.
+Apply this patch to OpenSSH 9.3p1 and build as normal.
 This will make ssh-store as well as special versions of ssh-agent, scp, and sftp
 (these scp and sftp don't disable agent forwarding and don't use the new
 PermitLocalCommand option that is not supported by older versions of the ssh
