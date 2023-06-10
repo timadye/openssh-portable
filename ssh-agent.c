@@ -586,6 +586,8 @@ identity_permitted(Identity *id, SocketEntry *e, char *user,
 
 	/* success */
 	return 0;
+}
+
 static void
 free_variable(Variable *v)
 {
@@ -2097,6 +2099,7 @@ process_message(u_int socknum)
 #endif /* ENABLE_PKCS11 */
 	case SSH_AGENTC_EXTENSION:
 		process_extension(e);
+		break;
 	case SSH_AGENTC_SET_VARIABLE:
 		process_set_variable(e);
 		break;
