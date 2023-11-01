@@ -2991,14 +2991,14 @@ sftp_make_absolute(char *p, const char *pwd)
 	*/
 	char *s1, *s2;
 	if (!is_absolute_path(p)) {
-		abs_str = path_append(pwd, p);
+		abs_str = sftp_path_append(pwd, p);
 		free(p);
 		p = abs_str;
 	}
 
 	/* Append "/" if needed to the absolute windows path */	
 	if (p && p[0] != '\0' && p[1] == ':') {
-		s1 = path_append("/", p);
+		s1 = sftp_path_append("/", p);
 		free(p);
 		p = s1;
 	}
