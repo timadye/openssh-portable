@@ -27,13 +27,20 @@ Describe "Tests for scp command" -Tags "CI" {
         $DestinationFilePath = Join-Path $DestinationDir $fileName1        
         $NestedSourceDir= Join-Path $SourceDir "nested"
         $NestedSourceFilePath = Join-Path $NestedSourceDir $fileName2
+        $tmpDir = Join-Path $testDir "tmpDir"
+        $tmpDirFilePath = Join-Path $tmpDir $fileName1
+        $tmpDirSymLinkPath = Join-Path $SourceDir "SymLinkDir"
         $null = New-Item $SourceDir -ItemType directory -Force -ErrorAction SilentlyContinue
         $null = New-Item $NestedSourceDir -ItemType directory -Force -ErrorAction SilentlyContinue
+        $null = New-Item $tmpDir -ItemType directory -Force -ErrorAction SilentlyContinue
         $null = New-item -path $SourceFilePath -ItemType file -force -ErrorAction SilentlyContinue
         $null = New-item -path $NestedSourceFilePath -ItemType file -force -ErrorAction SilentlyContinue
+        $null = New-item -path $tmpDirFilePath -ItemType file -force -ErrorAction SilentlyContinue
         "Test content111" | Set-content -Path $SourceFilePath
         "Test content333" | Set-content -Path $SourceFilePath3
         "Test content in nested dir" | Set-content -Path $NestedSourceFilePath
+        "Test content in tmp dir for sym link" | Set-content -Path $tmpDirFilePath
+        $null = New-Item -Path $tmpDirSymLinkPath -ItemType SymbolicLink -Value $tmpDir
         $null = New-Item $DestinationDir -ItemType directory -Force -ErrorAction SilentlyContinue
         $sshcmd = (get-command ssh).Path        
 
