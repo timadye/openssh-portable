@@ -25,6 +25,7 @@ forest() {
 	scpclean
 	rm -rf ${DIR2}
 	cp ${DATA} ${DIR}/copy
+# symbolic link test coverage on Windows is in SCP.Tests.ps1
 if [ "$os" != "windows" ]; then
 	ln -s ${DIR}/copy ${DIR}/copy-sym
 fi
