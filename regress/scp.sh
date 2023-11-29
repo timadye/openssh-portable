@@ -35,10 +35,14 @@ forest() {
 	scpclean
 	rm -rf ${DIR2}
 	cp ${DATA} ${DIR}/copy
+if [ "$os" != "windows" ]; then
 	ln -s ${DIR}/copy ${DIR}/copy-sym
+fi
 	mkdir ${DIR}/subdir
 	cp ${DATA} ${DIR}/subdir/copy
+if [ "$os" != "windows" ]; then
 	ln -s ${DIR}/subdir ${DIR}/subdir-sym
+fi
 }
 
 for mode in scp sftp ; do

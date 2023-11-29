@@ -25,10 +25,14 @@ forest() {
 	scpclean
 	rm -rf ${DIR2}
 	cp ${DATA} ${DIR}/copy
+if [ "$os" != "windows" ]; then
 	ln -s ${DIR}/copy ${DIR}/copy-sym
+fi
 	mkdir ${DIR}/subdir
 	cp ${DATA} ${DIR}/subdir/copy
+if [ "$os" != "windows" ]; then
 	ln -s ${DIR}/subdir ${DIR}/subdir-sym
+fi
 }
 
 for mode in scp sftp ; do
@@ -63,7 +67,7 @@ for mode in scp sftp ; do
 
 	verbose "$tag: recursive remote dir to remote dir"
 	forest
-	$SCP $scpopts -3r hostA:${DIR} hostB:${DIR2} || fail "copy failed"
+	$SCP "${scpopts[@]}" -3r hostA:${DIR} hostB:${DIR2} || fail "copy failed"
 	diff -r ${DIR} ${DIR2} || fail "corrupted copy"
 	diff -r ${DIR2} ${DIR} || fail "corrupted copy"
 
