@@ -50,9 +50,17 @@ for mode in scp sftp ; do
 	tag="$tid: $mode mode"
 	# scpopts should be an array to preverse the double quotes
 	if [ "$os" == "windows" ]; then
-		scpopts=(-qs -D ${SFTPSERVER})
+		if test $mode = scp ; then
+			scpopts=(-O -q -S "$TEST_SHELL_PATH ${OBJ}/scp-ssh-wrapper.scp")
+		else
+			scpopts=(-qs -D ${SFTPSERVER})
+		fi
 	else
-		scpopts="-qs -D ${SFTPSERVER}"
+		if test $mode = scp ; then
+			scpopts="-O -q -S ${OBJ}/scp-ssh-wrapper.scp"
+		else
+			scpopts="-qs -D ${SFTPSERVER}"
+		fi
 	fi
 
 	verbose "$tag: simple copy local file to local file"
@@ -117,7 +125,7 @@ for mode in scp sftp ; do
 
 	verbose "$tag: recursive local dir to remote dir"
 	forest
-	$SCP $scpopts -r ${DIR} somehost:${DIR2} || fail "copy failed"
+	$SCP "${scpopts[@]}" -r ${DIR} somehost:${DIR2} || fail "copy failed"
 	diff ${DIFFOPT} ${DIR} ${DIR2} || fail "corrupted copy"
 
 	verbose "$tag: recursive local dir to local dir"
@@ -219,5 +227,5 @@ for mode in scp sftp ; do
 	cmp ${COPY} ${COPY2} >/dev/null && fail "corrupt target"
 done
 
-#scpclean
+scpclean
 rm -f ${OBJ}/scp-ssh-wrapper.scp
