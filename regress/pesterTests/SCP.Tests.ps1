@@ -198,7 +198,7 @@ Describe "Tests for scp command" -Tags "CI" {
     }
 
     BeforeAll {
-        #$null = New-Item $DestinationDir -ItemType directory -Force -ErrorAction SilentlyContinue
+        $null = New-Item $DestinationDir -ItemType directory -Force -ErrorAction SilentlyContinue
     }
 
     AfterEach {
@@ -207,12 +207,14 @@ Describe "Tests for scp command" -Tags "CI" {
         $tI++
     }       
     
+
     It 'File copy: <Title> ' -TestCases:$testData {
         param([string]$Title, $Source, $Destination, [string]$Options)
         iex  "scp $Options $Source $Destination"
         $LASTEXITCODE | Should Be 0
         #validate file content. DestPath is the path to the file.
         CheckTarget -target $DestinationFilePath | Should Be $true
+        
         $equal = @(Compare-Object (Get-ChildItem -path $SourceFilePath) (Get-ChildItem -path $DestinationFilePath) -Property Name, Length ).Length -eq 0
         $equal | Should Be $true
 
@@ -239,10 +241,6 @@ Describe "Tests for scp command" -Tags "CI" {
             $equal | Should Be $true
         }
 
-        write-host "source dir:"
-        Get-ChildItem -Recurse -path $SourceDir | write-host
-        write-host "destination dir:"
-        Get-ChildItem -Recurse -path (join-path $DestinationDir $SourceDirName) | write-host
         $equal = @(Compare-Object (Get-ChildItem -Recurse -path $SourceDir) (Get-ChildItem -Recurse -path (join-path $DestinationDir $SourceDirName) ) -Property Name, Length).Length -eq 0
         $equal | Should Be $true
 
