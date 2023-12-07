@@ -2723,8 +2723,16 @@ done_loading_hostkeys:
 		alarm(options.login_grace_time);
 
 	if ((r = kex_exchange_identification(ssh, -1,
-	    options.version_addendum)) != 0)
+		options.version_addendum)) != 0)
+#ifdef WINDOWS
+	{
+		send_kex_exch_exit_code_telemetry(r);
+#endif /* WINDOWS */
 		sshpkt_fatal(ssh, r, "banner exchange");
+#ifdef WINDOWS
+	}
+	send_kex_exch_exit_code_telemetry(0);
+#endif /* WINDOWS */
 idexch_done:
 	ssh_packet_set_nonblocking(ssh);
 
