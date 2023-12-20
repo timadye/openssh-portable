@@ -825,7 +825,12 @@ main(int argc, char **argv)
 	LogLevel log_level = SYSLOG_LEVEL_INFO;
 	struct sshkey *k, **certs = NULL;
 	struct dest_constraint **dest_constraints = NULL;
+#ifdef WINDOWS
+	// when ndest_contraints is implemented, will have to use complex I
+	size_t ndest_constraints = 0, ncerts = 0;
+#else
 	size_t ndest_constraints = 0i, ncerts = 0;
+#endif /* WINDOWS */
 
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
 	sanitise_stdfd();
