@@ -18,9 +18,15 @@ authorized_keys() {
 trace "test config with sftp"
 authorized_keys
 rm -f $OBJ/ssh_proxy.tmp
-echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
-	${SFTP} -S ${SSH} -b - -qF $OBJ/ssh_proxy somehost 2>/dev/null || \
-	fail "sftp failed"
+if [ "$os" == "windows" ]; then
+	echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
+		${SFTP} -S "$TEST_SHELL_PATH ${SSH}" -b - -qF $OBJ/ssh_proxy somehost 2>/dev/null || \
+		fail "sftp failed"
+else
+	echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
+		${SFTP} -S ${SSH} -b - -qF $OBJ/ssh_proxy somehost 2>/dev/null || \
+		fail "sftp failed"
+fi
 test -f "$OBJ/ssh_proxy.tmp" || fail "sftp did not download file"
 rm -f $OBJ/ssh_proxy.tmp
 
@@ -37,16 +43,21 @@ ${SSH} -F $OBJ/ssh_proxy somehost false || fail "forced command config"
 
 authorized_keys
 cp $OBJ/sshd_proxy_bak $OBJ/sshd_proxy
+echo "ForceCommand false" >> $OBJ/sshd_proxy
 
 trace "force command overriding subsystem"
-echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
-	${SFTP} -S ${SSH} -F $OBJ/ssh_proxy -oLoglevel=quiet somehost && \
-	fail "sftp succeeded"
-
 if [ "$os" == "windows" ]; then
+	echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
+		${SFTP} -S "$TEST_SHELL_PATH ${SSH}" -F $OBJ/ssh_proxy -oLoglevel=quiet somehost && \
+		fail "sftp succeeded"
+
 	# If User is domainuser then it will be in "domain/user" so convert it to "domain\user"
 	echo "Match user ${USER//\//\\}" >>$OBJ/sshd_proxy
 else
+	echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
+		${SFTP} -S ${SSH} -F $OBJ/ssh_proxy -oLoglevel=quiet somehost && \
+		fail "sftp succeeded"
+
 	echo "Match User $USER" >>$OBJ/sshd_proxy
 fi
 echo "    ForceCommand true" >> $OBJ/sshd_proxy
@@ -55,17 +66,29 @@ trace "forced command with match"
 ${SSH} -F $OBJ/ssh_proxy somehost false || fail "forced command match"
 
 trace "force command in match overriding subsystem"
-echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
-	${SFTP} -S ${SSH} -F $OBJ/ssh_proxy -oLoglevel=quiet somehost && \
-	fail "sftp succeeded"
+if [ "$os" == "windows" ]; then
+	echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
+		${SFTP} -S "$TEST_SHELL_PATH ${SSH}" -F $OBJ/ssh_proxy -oLoglevel=quiet somehost && \
+		fail "sftp succeeded"
+else
+	echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
+		${SFTP} -S ${SSH} -F $OBJ/ssh_proxy -oLoglevel=quiet somehost && \
+		fail "sftp succeeded"
+fi
 
 trace "force command to sftpserver"
 grep -vi subsystem $OBJ/sshd_proxy_bak > $OBJ/sshd_proxy
 echo "Subsystem sftp /bin/false" >> $OBJ/sshd_proxy
 echo "ForceCommand ${SFTPSERVER}" >> $OBJ/sshd_proxy
 rm -f $OBJ/ssh_proxy.tmp
-echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
-	${SFTP} -S ${SSH} -b - -qF $OBJ/ssh_proxy somehost 2>/dev/null || \
-	fail "sftp failed"
+if [ "$os" == "windows" ]; then
+	echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
+		${SFTP} -S "$TEST_SHELL_PATH ${SSH}" -b - -qF $OBJ/ssh_proxy somehost 2>/dev/null || \
+		fail "sftp failed"
+else
+	echo "@get $OBJ/ssh_proxy $OBJ/ssh_proxy.tmp" | \
+		${SFTP} -S ${SSH} -b - -qF $OBJ/ssh_proxy somehost 2>/dev/null || \
+		fail "sftp failed"
+fi
 test -f "$OBJ/ssh_proxy.tmp" || fail "sftp did not download file"
 rm -f $OBJ/ssh_proxy.tmp
