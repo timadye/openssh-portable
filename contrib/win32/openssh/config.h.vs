@@ -1698,7 +1698,7 @@
 
 #define HAVE_BZERO 1
 #define PATH_MAX 32768
-#define S_IFIFO        0x1000  
+#define S_IFIFO        0x1000
 #define HAVE_EXPLICIT_BZERO
 #define HAVE_MBTOWC 1
 #define HAVE_LLABS 1
@@ -1713,7 +1713,7 @@
 #define __STDC__ 1
 
 #define umac128_new umac_new
-#define umac128_update umac_update 
+#define umac128_update umac_update
 #define umac_final umac128_final
 #define umac_delete umac128_delete
 
@@ -1768,3 +1768,4 @@
 #define HAVE_EVP_PKEY_GET0_RSA 1
 #define HAVE_EVP_MD_CTX_NEW 1
 #define HAVE_EVP_MD_CTX_FREE 1
+#define WITH_DSA 1
