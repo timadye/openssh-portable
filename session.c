@@ -104,6 +104,10 @@
 #include <selinux/selinux.h>
 #endif
 
+#ifdef WINDOWS
+#define mm_pty_allocate pty_allocate
+#endif /* WINDOWS */
+
 #define IS_INTERNAL_SFTP(c) \
 	(!strncmp(c, INTERNAL_SFTP_NAME, sizeof(INTERNAL_SFTP_NAME) - 1) && \
 	 (c[sizeof(INTERNAL_SFTP_NAME) - 1] == '\0' || \

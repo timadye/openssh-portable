@@ -166,6 +166,7 @@ int privsep_unauth_child = 0;
 int privsep_auth_child = 0;
 int io_sock_in = 0;
 int io_sock_out = 0;
+int win32_rexeced_flag = 0;
 #endif /* WINDOWS */
 
 /*
@@ -313,11 +314,12 @@ send_config_state(int fd, struct sshbuf* conf)
 		(r = sshbuf_put_stringb(m, inc)) != 0)
 		fatal_fr(r, "compose config");
 
+#ifndef WINDOWS
 	/* We need to fit the entire message inside the socket send buffer */
 	sz = ROUNDUP(sshbuf_len(m) + 5, 16 * 1024);
 	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz) == -1)
 		fatal_f("setsockopt SO_SNDBUF: %s", strerror(errno));
-
+#endif /* WINDOWS */
 	if (ssh_msg_send(fd, 0, m) == -1)
 		error_f("ssh_msg_send failed");
 
@@ -347,37 +349,36 @@ send_idexch_state(struct ssh *ssh, int fd)
 	sshbuf_free(m);
 }
 
-// TODO - determine if needed
-// static void
-// recv_idexch_state(struct ssh *ssh, int fd)
-// {
-// 	struct sshbuf *m;
-// 	u_char *cp, ver;
-// 	size_t tmp;
-// 	int r;
-// 	const u_char *valp;
-// 	size_t lenp;
+static void
+recv_idexch_state(struct ssh *ssh, int fd)
+{
+ 	struct sshbuf *m;
+ 	u_char *cp, ver;
+ 	size_t tmp;
+ 	int r;
+ 	const u_char *valp;
+ 	size_t lenp;
 
-// 	debug3("%s: entering fd = %d", __func__, fd);
+ 	debug3("%s: entering fd = %d", __func__, fd);
 
-// 	if ((m = sshbuf_new()) == NULL)
-// 		fatal("%s: sshbuf_new failed", __func__);
-// 	if (ssh_msg_recv(fd, m) == -1)
-// 		fatal("%s: ssh_msg_recv failed", __func__);
-// 	if ((r = sshbuf_get_u8(m, &ver)) != 0)
-// 		fatal("%s: buffer error: %s", __func__, ssh_err(r));
-// 	if (ver != 0)
-// 		fatal("%s: rexec version mismatch", __func__);
+ 	if ((m = sshbuf_new()) == NULL)
+ 		fatal("%s: sshbuf_new failed", __func__);
+ 	if (ssh_msg_recv(fd, m) == -1)
+ 		fatal("%s: ssh_msg_recv failed", __func__);
+ 	if ((r = sshbuf_get_u8(m, &ver)) != 0)
+ 		fatal("%s: buffer error: %s", __func__, ssh_err(r));
+ 	if (ver != 0)
+ 		fatal("%s: rexec version mismatch", __func__);
 
-// 	if (sshbuf_get_stringb(m, ssh->kex->client_version) != 0 ||
-// 	    sshbuf_get_stringb(m, ssh->kex->server_version) != 0 ||
-// 	    sshbuf_get_u32(m, &ssh->compat) != 0 )
-// 		fatal("%s: unable to retrieve idexch state", __func__);
+ 	if (sshbuf_get_stringb(m, ssh->kex->client_version) != 0 ||
+ 	    sshbuf_get_stringb(m, ssh->kex->server_version) != 0 ||
+ 	    sshbuf_get_u32(m, &ssh->compat) != 0 )
+ 		fatal("%s: unable to retrieve idexch state", __func__);
 
-// 	sshbuf_free(m);
+ 	sshbuf_free(m);
 
-// 	debug3("%s: done", __func__);
-// }
+ 	debug3("%s: done", __func__);
+}
 
 static void
 send_autxctx_state(Authctxt *auth, int fd)
@@ -468,31 +469,79 @@ send_hostkeys_state(int fd)
 	sshbuf_free(m);
 }
 
+static void
+recv_hostkeys_state(int fd)
+{
+	struct sshbuf* m;
+	u_char* cp, ver;
+	struct sshkey* key = NULL;
+	const u_char* blob;
+	size_t blen;
+	int r;
+	u_int32_t num_host_key_files;
+
+	debug3("%s: entering fd = %d", __func__, fd);
+
+	if ((m = sshbuf_new()) == NULL)
+		fatal("%s: sshbuf_new failed", __func__);
+	if (ssh_msg_recv(fd, m) == -1)
+		fatal("%s: ssh_msg_recv failed", __func__);
+	if ((r = sshbuf_get_u8(m, &ver)) != 0)
+		fatal("%s: buffer error: %s", __func__, ssh_err(r));
+	if (ver != 0)
+		fatal("%s: rexec version mismatch", __func__);
+
+	if ((r = sshbuf_get_u32(m, &num_host_key_files)) != 0)
+		fatal("%s: buffer error: %s", __func__, ssh_err(r));
+	sensitive_data.host_keys = xcalloc(num_host_key_files, sizeof(struct sshkey*));
+	sensitive_data.host_pubkeys = xcalloc(num_host_key_files, sizeof(struct sshkey*));
+	sensitive_data.host_certificates = xcalloc(num_host_key_files, sizeof(struct sshkey*));
+	for (int i = 0; i < num_host_key_files; i++) {
+		if ((r = sshbuf_get_string_direct(m, &blob, &blen)) != 0)
+			fatal("%s: buffer error: %s", __func__, ssh_err(r));
+		sensitive_data.host_pubkeys[i] = NULL;
+		sensitive_data.host_keys[i] = NULL;
+
+		if (blen) {
+			sshkey_from_blob(blob, blen, &key);
+			sensitive_data.host_pubkeys[i] = key;
+		}
+	}
+
+	for (int i = 0; i < num_host_key_files; i++) {
+		if ((r = sshbuf_get_string_direct(m, &blob, &blen)) != 0)
+			fatal("%s: buffer error: %s", __func__, ssh_err(r));
+		sensitive_data.host_certificates[i] = NULL;
+		if (blen) {
+			sshkey_from_blob(blob, blen, &key);
+			sensitive_data.host_certificates[i] = key;
+		}
+	}
+
+	sshbuf_free(m);
+	debug3("%s: done", __func__);
+}
+
 static char**
 privsep_child_cmdline(int authenticated)
 {
-	//char** argv = rexec_argv ? rexec_argv : saved_argv;
 	char** argv = saved_argv;
 	int argc = 0;
 
-	// if (rexec_argv)
-	// 	argc = rexec_argc;
-	//else {
-	//if (rexeced_flag)
-	//	argc = saved_argc - 1; // override '-R'
-	//else {
-	char **tmp = xcalloc(saved_argc + 1 + 1, sizeof(*saved_argv)); // 1 - extra argument "-y/-z", 1 - NULL
-	int i = 0;
-	for (i = 0; (int)i < saved_argc; i++) {
-		tmp[i] = xstrdup(saved_argv[i]);
-		free(saved_argv[i]);
-	}
+	if (win32_rexeced_flag)
+		argc = saved_argc - 1; // override '-R'
+	else {
+		char **tmp = xcalloc(saved_argc + 1 + 1, sizeof(*saved_argv)); // 1 - extra argument "-y/-z", 1 - NULL
+		int i = 0;
+		for (i = 0; (int)i < saved_argc; i++) {
+			tmp[i] = xstrdup(saved_argv[i]);
+			free(saved_argv[i]);
+		}
 
-	free(saved_argv);
-	argv = saved_argv = tmp;
-	argc = saved_argc;
-	//}
-	//}
+		free(saved_argv);
+		argv = saved_argv = tmp;
+		argc = saved_argc;
+	}
 
 	if (authenticated)
 		argv[argc] = "-z";
@@ -693,7 +742,6 @@ privsep_preauth(struct ssh *ssh)
 		close(pmonitor->m_recvfd);
 		close(pmonitor->m_log_sendfd);
 		send_config_state(pmonitor->m_sendfd, cfg);
-		send_hostkeys_state(pmonitor->m_sendfd);
 		send_idexch_state(ssh, pmonitor->m_sendfd);
 		monitor_child_preauth(ssh, pmonitor);
 		while (waitpid(pid, &status, 0) < 0) {
@@ -797,7 +845,6 @@ privsep_postauth(struct ssh *ssh, Authctxt *authctxt)
 
 		verbose("User child is on pid %ld", (long)pmonitor->m_pid);
 		send_config_state(pmonitor->m_sendfd, cfg);
-		send_hostkeys_state(pmonitor->m_sendfd);
 		send_idexch_state(ssh, pmonitor->m_sendfd);
 		send_autxctx_state(authctxt, pmonitor->m_sendfd);
 		monitor_send_keystate(pmonitor);
@@ -1387,6 +1434,9 @@ main(int ac, char **av)
 			break;
 		case 'R':
 			rexeced_flag = 1;
+#ifdef WINDOWS
+			win32_rexeced_flag = 1;
+#endif /* WINDOWS */
 			break;
 		case 'Q':
 			/* ignored */
@@ -1454,12 +1504,10 @@ main(int ac, char **av)
 #ifdef WINDOWS
 		case 'y':
 			privsep_unauth_child = 1;
-			//rexec_flag = 0;
 			logfile = NULL;
 			break;
 		case 'z':
 			privsep_auth_child = 1;
-			//rexec_flag = 0;
 			logfile = NULL;
 			break;
 #endif /* WINDOWS */
@@ -1476,16 +1524,22 @@ main(int ac, char **av)
 	}
 
 	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
-
+#ifdef WINDOWS
+	if (!rexeced_flag && !privsep_unauth_child && !privsep_auth_child)
+#else /* WINDOWS */
 	if (!rexeced_flag)
+#endif /* WINDOWS */
 		fatal("sshd-session should not be executed directly");
 #ifdef WINDOWS
 	if (privsep_unauth_child)
 		closefrom(PRIVSEP_UNAUTH_MIN_FREE_FD);
 	else if (privsep_auth_child)
 		closefrom(PRIVSEP_AUTH_MIN_FREE_FD);
-#endif /* WINDOWS */
+	else
+		closefrom(REEXEC_MIN_FREE_FD);
+#else /* WINDOWS */
 	closefrom(REEXEC_MIN_FREE_FD);
+#endif /* WINDOWS */
 
 	seed_rng();
 
@@ -1531,18 +1585,32 @@ main(int ac, char **av)
 	/* Fetch our configuration */
 	if ((cfg = sshbuf_new()) == NULL)
 		fatal("sshbuf_new config buf failed");
-	// TODO: is this still needed?
-	// if (privsep_unauth_child || privsep_auth_child)
-	// 	recv_config_state(PRIVSEP_MONITOR_FD, cfg); //TODO - should starup_pipe be closed as above ?
+
 	setproctitle("%s", "[rexeced]");
+
+#ifdef WINDOWS
+	if (privsep_unauth_child || privsep_auth_child) {
+		recv_rexec_state(PRIVSEP_MONITOR_FD, cfg, &timing_secret); //TODO - should starup_pipe be closed as above ?B
+	}
+	else {
+		recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg, &timing_secret);
+		close(REEXEC_CONFIG_PASS_FD);
+	}
+#else /* WINDOWS */
 	recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg, &timing_secret);
 	close(REEXEC_CONFIG_PASS_FD);
+#endif /* WINDOWS */
+
 	parse_server_config(&options, "rexec", cfg, &includes, NULL, 1);
 	/* Fill in default values for those options not explicitly set. */
 	fill_default_server_options(&options);
 	options.timing_secret = timing_secret;
 
+#ifdef WINDOWS
+	if (!debug_flag && !privsep_unauth_child && !privsep_auth_child) {
+#else /* WINDOWS */
 	if (!debug_flag) {
+#endif /* WINDOWS */
 		startup_pipe = dup(REEXEC_STARTUP_PIPE_FD);
 		close(REEXEC_STARTUP_PIPE_FD);
 		/*
@@ -1678,6 +1746,10 @@ main(int ac, char **av)
 	 * Register our connection.  This turns encryption off because we do
 	 * not have a key.
 	 */
+#ifdef WINDOWS
+	io_sock_in = sock_in;
+	io_sock_out = sock_out;
+#endif /* WINDOWS */
 	if ((ssh = ssh_packet_set_connection(NULL, sock_in, sock_out)) == NULL)
 		fatal("Unable to create connection");
 	the_active_state = ssh;
@@ -1718,11 +1790,10 @@ main(int ac, char **av)
 
 	rdomain = ssh_packet_rdomain_in(ssh);
 
-	// TODO: determine if this is still needed
-	// if (privsep_unauth_child || privsep_auth_child) {
-	// 	recv_idexch_state(ssh, PRIVSEP_MONITOR_FD);
-	// 	goto idexch_done;
-	// }
+	if (privsep_unauth_child || privsep_auth_child) {
+		recv_idexch_state(ssh, PRIVSEP_MONITOR_FD);
+		goto idexch_done;
+	}
 
 	/* Log the connection. */
 	laddr = get_local_ipaddr(sock_in);
@@ -1759,7 +1830,7 @@ main(int ac, char **av)
 	}
 	send_kex_exch_exit_code_telemetry(0);
 #endif /* WINDOWS */
-// TODO determine if needed - idexch_done:
+idexch_done:
 	ssh_packet_set_nonblocking(ssh);
 
 	/* allocate authentication context */

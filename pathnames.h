@@ -49,7 +49,11 @@
 
 /* Binary paths for the sshd components */
 #ifndef _PATH_SSHD_SESSION
+#ifdef WINDOWS
+#define _PATH_SSHD_SESSION		"sshd-session.exe" /* PATH looks in same directory as sshd automatically */
+#else /* WINDOWS */
 #define _PATH_SSHD_SESSION		"/usr/libexec/sshd-session"
+#endif /* WINDOWS */
 #endif
 
 /*

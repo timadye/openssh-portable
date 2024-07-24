@@ -129,6 +129,10 @@ int debug_flag = 0;
 static char **saved_argv;
 static int saved_argc;
 
+#ifdef WINDOWS
+static char** rexec_argv;
+#endif /* WINDOWS */
+
 /*
  * The sockets that the server is listening; this is used in the SIGHUP
  * signal handler.
@@ -237,6 +241,7 @@ sighup_handler(int sig)
 static void
 sighup_restart(void)
 {
+#ifndef WINDOWS // not applicable to Windows
 	logit("Received SIGHUP; restarting.");
 	if (options.pid_file != NULL)
 		unlink(options.pid_file);
@@ -244,10 +249,11 @@ sighup_restart(void)
 	close_listen_socks();
 	close_startup_pipes();
 	ssh_signal(SIGHUP, SIG_IGN); /* will be restored after exec */
-	execv(saved_argv[0], saved_argv); // CodeQL [SM01925] false positive: restarting sshd will verify inputs via case statement in main
+	execv(saved_argv[0], saved_argv);
 	logit("RESTART FAILED: av[0]='%.100s', error: %.100s.", saved_argv[0],
 	    strerror(errno));
 	exit(1);
+#endif /* WINDOWS */
 }
 
 /*
@@ -520,10 +526,12 @@ send_rexec_state(int fd, struct sshbuf *conf)
 	    (r = sshbuf_put_stringb(m, inc)) != 0)
 		fatal_fr(r, "compose config");
 
+#ifndef WINDOWS
 	/* We need to fit the entire message inside the socket send buffer */
 	sz = ROUNDUP(sshbuf_len(m) + 5, 16*1024);
 	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz) == -1)
 		fatal_f("setsockopt SO_SNDBUF: %s", strerror(errno));
+#endif /* WINDOWS */
 
 	if (ssh_msg_send(fd, 0, m) == -1)
 		error_f("ssh_msg_send failed");
@@ -806,6 +814,7 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s,
 				close(startup_p[1]);
 				continue;
 			}
+
 			fcntl(startup_p[0], F_SETFD, FD_CLOEXEC);
 			fcntl(startup_p[1], F_SETFD, FD_CLOEXEC);
 			fcntl(config_s[0], F_SETFD, FD_CLOEXEC);
@@ -838,7 +847,9 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s,
 				close(startup_p[1]);
 				startup_pipe = -1;
 				pid = getpid();
+#ifndef WINDOWS
 				send_rexec_state(config_s[0], cfg);
+#endif /* !WINDOWS */
 				close(config_s[0]);
 				free(pfd);
 				return;
@@ -857,12 +868,12 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s,
 				    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP) != 0 ||
 				    posix_spawnattr_setpgroup(&attributes, 0) != 0)
 					error("posix_spawn initialization failed");
-				// else {
-				// 	if (posix_spawn(&pid, rexec_argv[0], &actions, &attributes, rexec_argv, NULL) != 0)
-				// 		error("%s, posix_spawn failed", __func__);
-				// 	posix_spawn_file_actions_destroy(&actions);
-				// 	posix_spawnattr_destroy(&attributes);
-				// }
+				else {
+				 	if (posix_spawn(&pid, rexec_argv[0], &actions, &attributes, rexec_argv, NULL) != 0)
+				 		error("%s, posix_spawn failed", __func__);
+				 	posix_spawn_file_actions_destroy(&actions);
+				 	posix_spawnattr_destroy(&attributes);
+				}
 			}
 #else
 			/*
@@ -905,7 +916,6 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s,
 
 #endif /* fork unsupported */
 			close(startup_p[1]);
-
 			close(config_s[1]);
 			send_rexec_state(config_s[0], cfg);
 			close(config_s[0]);
@@ -998,7 +1008,12 @@ main(int ac, char **av)
 	int sock_in = -1, sock_out = -1, newsock = -1, rexec_argc = 0;
 	int config_s[2] = { -1 , -1 }, have_connection_info = 0;
 	int need_privsep = 1;
-	char *fp, *line, *logfile = NULL, **rexec_argv = NULL;
+#ifdef WINDOWS
+	// rexec_argv is still defined globally for use in server_accept_loop
+	char* fp, * line, * logfile = NULL;
+#else /* WINDOWS */
+	char* fp, * line, * logfile = NULL, **rexec_argv = NULL;
+#endif /* WINDOWS */
 	struct stat sb;
 	u_int i, j;
 	mode_t new_umask;
@@ -1155,10 +1170,6 @@ main(int ac, char **av)
 	}
 	if (!test_flag && !do_dump_cfg && !path_absolute(av[0]))
 		fatal("sshd re-exec requires execution with an absolute path");
-	// if (privsep_unauth_child)
-	// 	closefrom(PRIVSEP_UNAUTH_MIN_FREE_FD);
-	// else if (privsep_auth_child)
-	// 	closefrom(PRIVSEP_AUTH_MIN_FREE_FD);
 
 	closefrom(REEXEC_DEVCRYPTO_RESERVED_FD);
 
@@ -1257,12 +1268,6 @@ main(int ac, char **av)
 	if (do_dump_cfg)
 		print_config(&connection_info);
 
-	// TODO: does this need to be in ssh-session?
-	// if (privsep_auth_child || privsep_unauth_child) {
-	// 	recv_hostkeys_state(PRIVSEP_MONITOR_FD);
-	// 	goto done_loading_hostkeys;
-	// }
-
 	/* load host keys */
 	sensitive_data.host_keys = xcalloc(options.num_host_key_files,
 	    sizeof(struct sshkey *));
@@ -1286,7 +1291,6 @@ main(int ac, char **av)
 
 		if (options.host_key_files[i] == NULL)
 			continue;
-		//if (privsep_unauth_child || privsep_auth_child) key = NULL; else /*TODO - remove this*/
 		if ((r = sshkey_load_private(options.host_key_files[i], "",
 		    &key, NULL)) != 0 && r != SSH_ERR_SYSTEM_ERROR)
 			do_log2_r(r, ll, "Unable to load host key \"%s\"",
@@ -1462,6 +1466,8 @@ main(int ac, char **av)
 	rexec_argv = xcalloc(rexec_argc + 3, sizeof(char *));
 	/* Point to the sshd-session binary instead of sshd */
 	rexec_argv[0] = options.sshd_session_path;
+	extern wchar_t* __wprogdir;
+	debug("__wprogdir: %ls", __wprogdir);
 	for (i = 1; i < (u_int)rexec_argc; i++) {
 		debug("rexec_argv[%d]='%s'", i, saved_argv[i]);
 		rexec_argv[i] = saved_argv[i];
@@ -1519,11 +1525,6 @@ main(int ac, char **av)
 			fatal("socketpair: %s", strerror(errno));
 		send_rexec_state(config_s[0], cfg);
 		close(config_s[0]);
-	// } else if (privsep_unauth_child || privsep_auth_child) {
-	// 	sock_in = sock_out = dup(STDIN_FILENO);
-	// 	close(STDIN_FILENO);
-	// 	close(STDOUT_FILENO);
-	// 	startup_pipe = -1;
 	} else {
 		platform_pre_listen();
 		server_listen();
