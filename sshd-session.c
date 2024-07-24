@@ -70,6 +70,10 @@
 #include <prot.h>
 #endif
 
+#ifdef WINDOWS
+#include "sshTelemetry.h"
+#endif
+
 #include "xmalloc.h"
 #include "ssh.h"
 #include "ssh2.h"
@@ -116,6 +120,14 @@
 #define REEXEC_CONFIG_PASS_FD		(STDERR_FILENO + 3)
 #define REEXEC_MIN_FREE_FD		(STDERR_FILENO + 4)
 
+/* Privilege separation related spawn fds */
+#ifdef WINDOWS
+#define PRIVSEP_MONITOR_FD		(STDERR_FILENO + 1)
+#define PRIVSEP_LOG_FD			(STDERR_FILENO + 2)
+#define PRIVSEP_UNAUTH_MIN_FREE_FD	(PRIVSEP_LOG_FD + 1)
+#define PRIVSEP_AUTH_MIN_FREE_FD	(PRIVSEP_LOG_FD + 1)
+#endif /* WINDOWS */
+
 extern char *__progname;
 
 /* Server configuration options. */
@@ -138,9 +150,9 @@ static int inetd_flag = 0;
 /* debug goes to stderr unless inetd_flag is set */
 #ifdef WINDOWS
 int log_stderr = 0;
-#else
+#else /* WINDOWS */
 static int log_stderr = 0;
-#endif
+#endif /* WINDOWS */
 /* Saved arguments to main(). */
 static char **saved_argv;
 static int saved_argc;
@@ -148,6 +160,13 @@ static int saved_argc;
 /* Daemon's agent connection */
 int auth_sock = -1;
 static int have_agent = 0;
+
+#ifdef WINDOWS
+int privsep_unauth_child = 0;
+int privsep_auth_child = 0;
+int io_sock_in = 0;
+int io_sock_out = 0;
+#endif /* WINDOWS */
 
 /*
  * Any really sensitive data in the application is contained in this
@@ -199,6 +218,116 @@ void demote_sensitive_data(void);
 static void do_ssh2_kex(struct ssh *);
 
 #ifdef WINDOWS
+/* copied from sshd.c */
+static struct sshbuf*
+pack_hostkeys(void)
+{
+	struct sshbuf* keybuf = NULL, * hostkeys = NULL;
+	int r;
+	u_int i;
+
+	if ((keybuf = sshbuf_new()) == NULL ||
+		(hostkeys = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new failed");
+
+	/* pack hostkeys into a string. Empty key slots get empty strings */
+	for (i = 0; i < options.num_host_key_files; i++) {
+		/* private key */
+		sshbuf_reset(keybuf);
+		if (sensitive_data.host_keys[i] != NULL &&
+			(r = sshkey_private_serialize(sensitive_data.host_keys[i],
+				keybuf)) != 0)
+			fatal_fr(r, "serialize hostkey private");
+		if ((r = sshbuf_put_stringb(hostkeys, keybuf)) != 0)
+			fatal_fr(r, "compose hostkey private");
+		/* public key */
+		if (sensitive_data.host_pubkeys[i] != NULL) {
+			if ((r = sshkey_puts(sensitive_data.host_pubkeys[i],
+				hostkeys)) != 0)
+				fatal_fr(r, "compose hostkey public");
+		}
+		else {
+			if ((r = sshbuf_put_string(hostkeys, NULL, 0)) != 0)
+				fatal_fr(r, "compose hostkey empty public");
+		}
+		/* cert */
+		if (sensitive_data.host_certificates[i] != NULL) {
+			if ((r = sshkey_puts(
+				sensitive_data.host_certificates[i],
+				hostkeys)) != 0)
+				fatal_fr(r, "compose host cert");
+		}
+		else {
+			if ((r = sshbuf_put_string(hostkeys, NULL, 0)) != 0)
+				fatal_fr(r, "compose host cert empty");
+		}
+	}
+
+	sshbuf_free(keybuf);
+	return hostkeys;
+}
+
+static void
+send_config_state(int fd, struct sshbuf* conf)
+{
+	/* copied from send_rexec_state in sshd.c */
+	struct sshbuf* m = NULL, * inc = NULL, * hostkeys = NULL;
+	struct include_item* item = NULL;
+	int r, sz;
+
+	debug3_f("entering fd = %d config len %zu", fd,
+		sshbuf_len(conf));
+
+	if ((m = sshbuf_new()) == NULL ||
+		(inc = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new failed");
+
+	/* pack includes into a string */
+	TAILQ_FOREACH(item, &includes, entry) {
+		if ((r = sshbuf_put_cstring(inc, item->selector)) != 0 ||
+			(r = sshbuf_put_cstring(inc, item->filename)) != 0 ||
+			(r = sshbuf_put_stringb(inc, item->contents)) != 0)
+			fatal_fr(r, "compose includes");
+	}
+
+	hostkeys = pack_hostkeys();
+
+	/*
+	 * Protocol from reexec master to child:
+	 *	string	configuration
+	 *	uint64	timing_secret
+	 *	string	host_keys[] {
+	 *		string private_key
+	 *		string public_key
+	 *		string certificate
+	 *	}
+	 *	string	included_files[] {
+	 *		string	selector
+	 *		string	filename
+	 *		string	contents
+	 *	}
+	 */
+	if ((r = sshbuf_put_stringb(m, conf)) != 0 ||
+		(r = sshbuf_put_u64(m, options.timing_secret)) != 0 ||
+		(r = sshbuf_put_stringb(m, hostkeys)) != 0 ||
+		(r = sshbuf_put_stringb(m, inc)) != 0)
+		fatal_fr(r, "compose config");
+
+	/* We need to fit the entire message inside the socket send buffer */
+	sz = ROUNDUP(sshbuf_len(m) + 5, 16 * 1024);
+	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz) == -1)
+		fatal_f("setsockopt SO_SNDBUF: %s", strerror(errno));
+
+	if (ssh_msg_send(fd, 0, m) == -1)
+		error_f("ssh_msg_send failed");
+
+	sshbuf_free(m);
+	sshbuf_free(inc);
+	sshbuf_free(hostkeys);
+
+	debug3_f("done");
+}
+
 static void
 send_idexch_state(struct ssh *ssh, int fd)
 {
@@ -342,27 +471,28 @@ send_hostkeys_state(int fd)
 static char**
 privsep_child_cmdline(int authenticated)
 {
-	char** argv = rexec_argv ? rexec_argv : saved_argv;
+	//char** argv = rexec_argv ? rexec_argv : saved_argv;
+	char** argv = saved_argv;
 	int argc = 0;
 
-	if (rexec_argv)
-		argc = rexec_argc;
-	else {
-		if (rexeced_flag)
-			argc = saved_argc - 1; // override '-R'
-		else {
-			char **tmp = xcalloc(saved_argc + 1 + 1, sizeof(*saved_argv)); // 1 - extra argument "-y/-z", 1 - NULL
-			int i = 0;
-			for (i = 0; (int)i < saved_argc; i++) {
-				tmp[i] = xstrdup(saved_argv[i]);
-				free(saved_argv[i]);
-			}
-
-			free(saved_argv);
-			argv = saved_argv = tmp;
-			argc = saved_argc;
-		}
+	// if (rexec_argv)
+	// 	argc = rexec_argc;
+	//else {
+	//if (rexeced_flag)
+	//	argc = saved_argc - 1; // override '-R'
+	//else {
+	char **tmp = xcalloc(saved_argc + 1 + 1, sizeof(*saved_argv)); // 1 - extra argument "-y/-z", 1 - NULL
+	int i = 0;
+	for (i = 0; (int)i < saved_argc; i++) {
+		tmp[i] = xstrdup(saved_argv[i]);
+		free(saved_argv[i]);
 	}
+
+	free(saved_argv);
+	argv = saved_argv = tmp;
+	argc = saved_argc;
+	//}
+	//}
 
 	if (authenticated)
 		argv[argc] = "-z";
@@ -1212,8 +1342,13 @@ main(int ac, char **av)
 	initialize_server_options(&options);
 
 	/* Parse command-line arguments. */
+#ifdef WINDOWS
+	while ((opt = getopt(ac, av,
+		"C:E:b:c:f:g:h:k:o:p:u:46DGQRTdeiqrtVyz")) != -1) {
+#else /* WINDOWS */
 	while ((opt = getopt(ac, av,
 	    "C:E:b:c:f:g:h:k:o:p:u:46DGQRTdeiqrtV")) != -1) {
+#endif /* WINDOWS */
 		switch (opt) {
 		case '4':
 			options.address_family = AF_INET;
@@ -1316,6 +1451,18 @@ main(int ac, char **av)
 			fprintf(stderr, "%s, %s\n",
 			    SSH_RELEASE, SSH_OPENSSL_VERSION);
 			exit(0);
+#ifdef WINDOWS
+		case 'y':
+			privsep_unauth_child = 1;
+			//rexec_flag = 0;
+			logfile = NULL;
+			break;
+		case 'z':
+			privsep_auth_child = 1;
+			//rexec_flag = 0;
+			logfile = NULL;
+			break;
+#endif /* WINDOWS */
 		default:
 			usage();
 			break;
@@ -1332,7 +1479,12 @@ main(int ac, char **av)
 
 	if (!rexeced_flag)
 		fatal("sshd-session should not be executed directly");
-
+#ifdef WINDOWS
+	if (privsep_unauth_child)
+		closefrom(PRIVSEP_UNAUTH_MIN_FREE_FD);
+	else if (privsep_auth_child)
+		closefrom(PRIVSEP_AUTH_MIN_FREE_FD);
+#endif /* WINDOWS */
 	closefrom(REEXEC_MIN_FREE_FD);
 
 	seed_rng();

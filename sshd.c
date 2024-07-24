@@ -857,13 +857,12 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s,
 				    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP) != 0 ||
 				    posix_spawnattr_setpgroup(&attributes, 0) != 0)
 					error("posix_spawn initialization failed");
-				else {
-					if (posix_spawn(&pid, rexec_argv[0], &actions, &attributes, rexec_argv, NULL) != 0)
-						error("%s, posix_spawn failed", __func__);
-					posix_spawn_file_actions_destroy(&actions);
-					posix_spawnattr_destroy(&attributes);
-				}
-
+				// else {
+				// 	if (posix_spawn(&pid, rexec_argv[0], &actions, &attributes, rexec_argv, NULL) != 0)
+				// 		error("%s, posix_spawn failed", __func__);
+				// 	posix_spawn_file_actions_destroy(&actions);
+				// 	posix_spawnattr_destroy(&attributes);
+				// }
 			}
 #else
 			/*
@@ -1041,13 +1040,8 @@ main(int ac, char **av)
 	initialize_server_options(&options);
 
 	/* Parse command-line arguments. */
-#ifdef WINDOWS
-	while ((opt = getopt(ac, av,
-		"C:E:b:c:f:g:h:k:o:p:u:46DGQRTdeiqrtVyz")) != -1) {
-#else
 	while ((opt = getopt(ac, av,
 		"C:E:b:c:f:g:h:k:o:p:u:46DGQRTdeiqrtV")) != -1) {
-#endif /* WINDOWS */
 		switch (opt) {
 		case '4':
 			options.address_family = AF_INET;
@@ -1154,31 +1148,17 @@ main(int ac, char **av)
 			fprintf(stderr, "%s, %s\n",
 			    SSH_RELEASE, SSH_OPENSSL_VERSION);
 			exit(0);
-#ifdef WINDOWS
-		case 'y':
-			privsep_unauth_child = 1;
-			rexec_flag = 0;
-			logfile = NULL;
-			//Sleep(10 * 1000);
-			break;
-		case 'z':
-			privsep_auth_child = 1;
-			rexec_flag = 0;
-			logfile = NULL;
-			//Sleep(10 * 1000);
-			break;
-#endif /* WINDOWS */
 		default:
 			usage();
 			break;
 		}
 	}
-	if (!test_flag && !do_dump_cfg && rexec_flag && !path_absolute(av[0]))
+	if (!test_flag && !do_dump_cfg && !path_absolute(av[0]))
 		fatal("sshd re-exec requires execution with an absolute path");
-	if (privsep_unauth_child)
-		closefrom(PRIVSEP_UNAUTH_MIN_FREE_FD);
-	else if (privsep_auth_child)
-		closefrom(PRIVSEP_AUTH_MIN_FREE_FD);
+	// if (privsep_unauth_child)
+	// 	closefrom(PRIVSEP_UNAUTH_MIN_FREE_FD);
+	// else if (privsep_auth_child)
+	// 	closefrom(PRIVSEP_AUTH_MIN_FREE_FD);
 
 	closefrom(REEXEC_DEVCRYPTO_RESERVED_FD);
 
@@ -1275,12 +1255,13 @@ main(int ac, char **av)
 	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
 
 	if (do_dump_cfg)
-		print_config(ssh, connection_info);
+		print_config(&connection_info);
 
-	if (privsep_auth_child || privsep_unauth_child) {
-		recv_hostkeys_state(PRIVSEP_MONITOR_FD);
-		goto done_loading_hostkeys;
-	}
+	// TODO: does this need to be in ssh-session?
+	// if (privsep_auth_child || privsep_unauth_child) {
+	// 	recv_hostkeys_state(PRIVSEP_MONITOR_FD);
+	// 	goto done_loading_hostkeys;
+	// }
 
 	/* load host keys */
 	sensitive_data.host_keys = xcalloc(options.num_host_key_files,
@@ -1305,7 +1286,7 @@ main(int ac, char **av)
 
 		if (options.host_key_files[i] == NULL)
 			continue;
-		if (privsep_unauth_child || privsep_auth_child) key = NULL; else /*TODO - remove this*/
+		//if (privsep_unauth_child || privsep_auth_child) key = NULL; else /*TODO - remove this*/
 		if ((r = sshkey_load_private(options.host_key_files[i], "",
 		    &key, NULL)) != 0 && r != SSH_ERR_SYSTEM_ERROR)
 			do_log2_r(r, ll, "Unable to load host key \"%s\"",
@@ -1538,11 +1519,11 @@ main(int ac, char **av)
 			fatal("socketpair: %s", strerror(errno));
 		send_rexec_state(config_s[0], cfg);
 		close(config_s[0]);
-	} else if (privsep_unauth_child || privsep_auth_child) {
-		sock_in = sock_out = dup(STDIN_FILENO);
-		close(STDIN_FILENO);
-		close(STDOUT_FILENO);
-		startup_pipe = -1;
+	// } else if (privsep_unauth_child || privsep_auth_child) {
+	// 	sock_in = sock_out = dup(STDIN_FILENO);
+	// 	close(STDIN_FILENO);
+	// 	close(STDOUT_FILENO);
+	// 	startup_pipe = -1;
 	} else {
 		platform_pre_listen();
 		server_listen();
@@ -1600,7 +1581,6 @@ main(int ac, char **av)
 			debug3("dup2 config_s: %s", strerror(errno));
 		close(config_s[1]);
 	}
-#endif
 	if (startup_pipe == -1)
 		close(REEXEC_STARTUP_PIPE_FD);
 	else if (startup_pipe != REEXEC_STARTUP_PIPE_FD) {
@@ -1613,6 +1593,7 @@ main(int ac, char **av)
 	execv(rexec_argv[0], rexec_argv);
 
 	fatal("rexec of %s failed: %s", rexec_argv[0], strerror(errno));
+#endif /* FORK_NOT_SUPPORTED */
 }
 
 /* server specific fatal cleanup */
