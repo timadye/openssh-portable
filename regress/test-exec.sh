@@ -1,4 +1,4 @@
-#	$OpenBSD: test-exec.sh,v 1.108 2024/03/08 11:34:10 dtucker Exp $
+#	$OpenBSD: test-exec.sh,v 1.109 2024/03/25 01:28:29 dtucker Exp $
 #	Placed in the Public Domain.
 
 #SUDO=sudo
@@ -422,10 +422,18 @@ have_prog()
 jot() {
 	awk "BEGIN { for (i = $2; i < $2 + $1; i++) { printf \"%d\n\", i } exit }"
 }
+
 if [ ! -x "`which rev`" ]; then
 rev()
 {
 	awk '{for (i=length; i>0; i--) printf "%s", substr($0, i, 1); print ""}'
+}
+fi
+
+if [ -x "/usr/xpg4/bin/id" ]; then
+id()
+{
+	/usr/xpg4/bin/id $@
 }
 fi
 
@@ -884,17 +892,18 @@ puttysetup() {
 	echo "ProxyLocalhost=1" >> ${OBJ}/.putty/sessions/localhost_proxy
 
 	PUTTYVER="`${PLINK} --version | awk '/plink: Release/{print $3}'`"
+	PUTTYMAJORVER="`echo ${PUTTYVER} | cut -f1 -d.`"
 	PUTTYMINORVER="`echo ${PUTTYVER} | cut -f2 -d.`"
-	verbose "plink version ${PUTTYVER} minor ${PUTTYMINORVER}"
+	verbose "plink version ${PUTTYVER} major ${PUTTYMAJORVER} minor ${PUTTYMINORVER}"
 
 	# Re-enable ssh-rsa on older PuTTY versions since they don't do newer
 	# key types.
-	if [ "$PUTTYMINORVER" -lt "76" ]; then
+	if [ "$PUTTYMAJORVER" -eq "0" ] && [ "$PUTTYMINORVER" -lt "76" ]; then
 		echo "HostKeyAlgorithms +ssh-rsa" >> ${OBJ}/sshd_proxy
 		echo "PubkeyAcceptedKeyTypes +ssh-rsa" >> ${OBJ}/sshd_proxy
 	fi
 
-	if [ "$PUTTYMINORVER" -le "64" ]; then
+	if [ "$PUTTYMAJORVER" -eq "0" ] && [ "$PUTTYMINORVER" -le "64" ]; then
 		echo "KexAlgorithms +diffie-hellman-group14-sha1" \
 		    >>${OBJ}/sshd_proxy
 	fi

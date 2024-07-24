@@ -1,4 +1,4 @@
-/* $OpenBSD: sftp.c,v 1.237 2024/02/01 02:37:33 djm Exp $ */
+/* $OpenBSD: sftp.c,v 1.238 2024/04/30 06:16:55 djm Exp $ */
 /*
  * Copyright (c) 2001-2004 Damien Miller <djm@openbsd.org>
  *
@@ -2354,8 +2354,10 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 #endif
 		interrupted = 0;
 		if (el == NULL) {
-			if (interactive)
+			if (interactive) {
 				printf("sftp> ");
+				fflush(stdout);
+			}
 			if (fgets(cmd, sizeof(cmd), infile) == NULL) {
 				if (interactive)
 					printf("\n");
