@@ -1,4 +1,4 @@
-/* $OpenBSD: sshd-session.c,v 1.1 2024/05/17 00:30:24 djm Exp $ */
+/* $OpenBSD: sshd-session.c,v 1.4 2024/06/26 23:16:52 deraadt Exp $ */
 /*
  * SSH2 implementation:
  * Privilege Separation:
@@ -554,23 +554,32 @@ privsep_child_cmdline(int authenticated)
 
 /*
  * Signal handler for the alarm after the login grace period has expired.
+ * As usual, this may only take signal-safe actions, even though it is
+ * terminal.
  */
 static void
 grace_alarm_handler(int sig)
 {
+#ifdef WINDOWS
+	// TODO: figure out if we need to kill any child processes
+#else /* WINDOWS */
 	/*
 	 * Try to kill any processes that we have spawned, E.g. authorized
 	 * keys command helpers or privsep children.
 	 */
 	if (getpgid(0) == getpid()) {
-		ssh_signal(SIGTERM, SIG_IGN);
+		struct sigaction sa;
+
+		/* mask all other signals while in handler */
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = SIG_IGN;
+		sigfillset(&sa.sa_mask);
+		sa.sa_flags = SA_RESTART;
+		(void)sigaction(SIGTERM, &sa, NULL);
 		kill(0, SIGTERM);
 	}
-
-	/* Log error and exit. */
-	sigdie("Timeout before authentication for %s port %d",
-	    ssh_remote_ipaddr(the_active_state),
-	    ssh_remote_port(the_active_state));
+#endif /* WINDOWS */
+	_exit(EXIT_LOGIN_GRACE);
 }
 
 /* Destroy the host and server keys.  They will no longer be needed. */
@@ -815,6 +824,21 @@ privsep_preauth(struct ssh *ssh)
 static void
 privsep_postauth(struct ssh *ssh, Authctxt *authctxt)
 {
+	int skip_privdrop = 0;
+
+	/*
+	 * Hack for systems that don't support FD passing: retain privileges
+	 * in the post-auth privsep process so it can allocate PTYs directly.
+	 * This is basically equivalent to what we did <= 9.7, which was to
+	 * disable post-auth privsep entriely.
+	 * Cygwin doesn't need to drop privs here although it doesn't support
+	 * fd passing, as AFAIK PTY allocation on this platform doesn't require
+	 * special privileges to begin with.
+	 */
+#if defined(DISABLE_FD_PASSING) && !defined(HAVE_CYGWIN)
+	skip_privdrop = 1;
+#endif
+
 	/* New socket pair */
 #ifdef WINDOWS
 	monitor_reinit_withlogs(pmonitor);
@@ -909,7 +933,8 @@ skip:
 	reseed_prngs();
 
 	/* Drop privileges */
-	do_setusercontext(authctxt->pw);
+	if (!skip_privdrop)
+		do_setusercontext(authctxt->pw);
 
 	/* It is safe now to apply the key state */
 	monitor_apply_keystate(ssh, pmonitor);
@@ -1569,25 +1594,10 @@ main(int ac, char **av)
 
 	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
 
-	/* Store privilege separation user for later use if required. */
-	privsep_chroot = (getuid() == 0 || geteuid() == 0);
-	if ((privsep_pw = getpwnam(SSH_PRIVSEP_USER)) == NULL) {
-		if (privsep_chroot || options.kerberos_authentication)
-			fatal("Privilege separation user %s does not exist",
-			    SSH_PRIVSEP_USER);
-	} else {
-		privsep_pw = pwcopy(privsep_pw);
-		freezero(privsep_pw->pw_passwd, strlen(privsep_pw->pw_passwd));
-		privsep_pw->pw_passwd = xstrdup("*");
-	}
-	endpwent();
-
 	/* Fetch our configuration */
 	if ((cfg = sshbuf_new()) == NULL)
 		fatal("sshbuf_new config buf failed");
-
 	setproctitle("%s", "[rexeced]");
-
 #ifdef WINDOWS
 	if (privsep_unauth_child || privsep_auth_child) {
 		recv_rexec_state(PRIVSEP_MONITOR_FD, cfg, &timing_secret); //TODO - should starup_pipe be closed as above ?B
@@ -1600,11 +1610,23 @@ main(int ac, char **av)
 	recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg, &timing_secret);
 	close(REEXEC_CONFIG_PASS_FD);
 #endif /* WINDOWS */
-
 	parse_server_config(&options, "rexec", cfg, &includes, NULL, 1);
 	/* Fill in default values for those options not explicitly set. */
 	fill_default_server_options(&options);
 	options.timing_secret = timing_secret;
+
+	/* Store privilege separation user for later use if required. */
+	privsep_chroot = (getuid() == 0 || geteuid() == 0);
+	if ((privsep_pw = getpwnam(SSH_PRIVSEP_USER)) == NULL) {
+		if (privsep_chroot || options.kerberos_authentication)
+			fatal("Privilege separation user %s does not exist",
+			    SSH_PRIVSEP_USER);
+	} else {
+		privsep_pw = pwcopy(privsep_pw);
+		freezero(privsep_pw->pw_passwd, strlen(privsep_pw->pw_passwd));
+		privsep_pw->pw_passwd = xstrdup("*");
+	}
+	endpwent();
 
 #ifdef WINDOWS
 	if (!debug_flag && !privsep_unauth_child && !privsep_auth_child) {
@@ -1678,7 +1700,7 @@ main(int ac, char **av)
 		}
 	}
 	if (!have_key)
-		fatal("internal error: monitor recieved no hostkeys");
+		fatal("internal error: monitor received no hostkeys");
 
 	/* Ensure that umask disallows at least group and world write */
 	new_umask = umask(0077) | 0022;
@@ -1873,6 +1895,8 @@ idexch_done:
 	ssh_signal(SIGALRM, SIG_DFL);
 	authctxt->authenticated = 1;
 	if (startup_pipe != -1) {
+		/* signal listener that authentication completed successfully */
+		(void)atomicio(vwrite, startup_pipe, "\001", 1);
 		close(startup_pipe);
 		startup_pipe = -1;
 	}
@@ -2021,6 +2045,8 @@ do_ssh2_kex(struct ssh *ssh)
 void
 cleanup_exit(int i)
 {
+	extern int auth_attempted; /* monitor.c */
+
 	if (the_active_state != NULL && the_authctxt != NULL) {
 		do_cleanup(the_active_state, the_authctxt);
 		if (privsep_is_preauth &&
@@ -2033,9 +2059,12 @@ cleanup_exit(int i)
 			}
 		}
 	}
+	/* Override default fatal exit value when auth was attempted */
+	if (i == 255 && auth_attempted)
+		_exit(EXIT_AUTH_ATTEMPTED);
 #ifdef SSH_AUDIT_EVENTS
 	/* done after do_cleanup so it can cancel the PAM auth 'thread' */
-	if (the_active_state != NULL && (!use_privsep || mm_is_monitor()))
+	if (the_active_state != NULL && mm_is_monitor())
 		audit_event(the_active_state, SSH_CONNECTION_ABANDON);
 #endif
 	_exit(i);

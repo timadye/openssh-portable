@@ -103,6 +103,7 @@
 /* Define if your platform needs to skip post auth
  file descriptor passing */
 /* #undef DISABLE_FD_PASSING */
+#define DISABLE_FD_PASSING
 
 /* Define if you don't want to use lastlog */
 /* #undef DISABLE_LASTLOG */

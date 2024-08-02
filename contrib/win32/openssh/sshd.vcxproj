@@ -447,6 +447,7 @@
     <ClCompile Include="$(OpenSSH-Src-Path)contrib\win32\win32compat\wmain_sshd.c" />
     <ClCompile Include="..\..\..\auth2-methods.c" />
     <ClCompile Include="..\..\..\misc.c" />
+    <ClCompile Include="..\..\..\platform-listen.c" />
     <ClCompile Include="..\..\..\srclimit.c" />
     <ClCompile Include="..\..\..\ssh-sk-client.c" />
     <ClCompile Include="..\..\..\sshkey.c" />

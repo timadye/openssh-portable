@@ -104,9 +104,16 @@
 #include <selinux/selinux.h>
 #endif
 
-#ifdef WINDOWS
+/*
+ * Hack for systems that do not support FD passing: allocate PTYs directly
+ * without calling into the monitor. This requires either the post-auth
+ * privsep process retain root privileges (see the comment in
+ * sshd-session.c:privsep_postauth) or that PTY allocation doesn't require
+ * privileges to begin with (e.g. Cygwin).
+ */
+#ifdef DISABLE_FD_PASSING
 #define mm_pty_allocate pty_allocate
-#endif /* WINDOWS */
+#endif
 
 #define IS_INTERNAL_SFTP(c) \
 	(!strncmp(c, INTERNAL_SFTP_NAME, sizeof(INTERNAL_SFTP_NAME) - 1) && \
@@ -716,13 +723,13 @@ do_exec(struct ssh *ssh, Session *s, const char *command)
 
 #ifdef SSH_AUDIT_EVENTS
 	if (command != NULL)
-		PRIVSEP(audit_run_command(command));
+		mm_audit_run_command(command);
 	else if (s->ttyfd == -1) {
 		char *shell = s->pw->pw_shell;
 
 		if (shell[0] == '\0')	/* empty shell means /bin/sh */
 			shell =_PATH_BSHELL;
-		PRIVSEP(audit_run_command(shell));
+		mm_audit_run_command(shell);
 	}
 #endif
 	if (s->ttyfd != -1)

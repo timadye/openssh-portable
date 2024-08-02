@@ -1,4 +1,4 @@
-/* $OpenBSD: clientloop.c,v 1.406 2024/05/09 09:46:47 djm Exp $ */
+/* $OpenBSD: clientloop.c,v 1.408 2024/07/01 04:31:17 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -193,7 +193,6 @@ TAILQ_HEAD(global_confirms, global_confirm);
 static struct global_confirms global_confirms =
     TAILQ_HEAD_INITIALIZER(global_confirms);
 
-void ssh_process_session2_setup(int, int, int, struct sshbuf *);
 static void quit_message(const char *fmt, ...)
     __attribute__((__format__ (printf, 1, 2)));
 
@@ -616,8 +615,9 @@ obfuscate_keystroke_timing(struct ssh *ssh, struct timespec *timeout,
 		if (timespeccmp(&now, &chaff_until, >=)) {
 			/* Stop if there have been no keystrokes for a while */
 			stop_reason = "chaff time expired";
-		} else if (timespeccmp(&now, &next_interval, >=)) {
-			/* Otherwise if we were due to send, then send chaff */
+		} else if (timespeccmp(&now, &next_interval, >=) &&
+		    !ssh_packet_have_data_to_write(ssh)) {
+			/* If due to send but have no data, then send chaff */
 			if (send_chaff(ssh))
 				nchaff++;
 		}
