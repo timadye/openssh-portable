@@ -1,9 +1,10 @@
 name: Upstream self-hosted
 
 on:
-  push:
-    branches: [ master ]
-    paths: [ '**.c', '**.h', '**.sh', '.github/configs', '.github/workflows/upstream.yml' ]
+  workflow_dispatch: # disable for win32-openssh fork
+  # push:
+  #   branches: [ master ]
+  #   paths: [ '**.c', '**.h', '**.sh', '.github/configs', '.github/workflows/upstream.yml' ]
 
 jobs:
   selfhosted:
