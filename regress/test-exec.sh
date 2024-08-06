@@ -523,6 +523,7 @@ stop_sshd ()
 			exit 1
 		fi
 		PIDFILE=""
+	fi
 }
 
 # helper
