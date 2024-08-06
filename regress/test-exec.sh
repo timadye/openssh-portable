@@ -496,7 +496,7 @@ stop_sshd ()
 	# windows process can't be stopped using kill command so use stop-process
 	if [ "$os" == "windows" ]; then
 		powershell.exe /c "stop-process -Name sshd -Force" >/dev/null 2>&1
-	 else
+	else
 		[ -z $PIDFILE ] && return
 		[ -f $PIDFILE ] || return
 		pid=`$SUDO cat $PIDFILE`
