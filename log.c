@@ -452,6 +452,21 @@ sshlogdie(const char *file, const char *func, int line, int showfunc,
 	cleanup_exit(255);
 }
 
+#ifdef WINDOWS
+void
+sshsigdie(const char* file, const char* func, int line, int showfunc,
+	LogLevel level, const char* suffix, const char* fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	sshlogv(file, func, line, showfunc, SYSLOG_LEVEL_FATAL,
+		suffix, fmt, args);
+	va_end(args);
+	_exit(1);
+}
+#endif /* WINDOWS */
+
 void
 sshlogv(const char *file, const char *func, int line, int showfunc,
     LogLevel level, const char *suffix, const char *fmt, va_list args)
