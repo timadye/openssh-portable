@@ -125,6 +125,9 @@ ServerOptions options;
  * the first connection.
  */
 int debug_flag = 0;
+#ifdef WINDOWS
+debug_startup_p = -1;
+#endif /* WINDOWS */
 
 /* Saved arguments to main(). */
 static char **saved_argv;
@@ -1122,12 +1125,16 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s,
 				*sock_in = *newsock;
 				*sock_out = *newsock;
 				close(startup_p[0]);
-				close(startup_p[1]);
-				startup_pipe = -1;
 #ifndef WINDOWS
+				close(startup_p[1]);
+#endif /* WINDOWS */
+				startup_pipe = -1;
+#ifdef WINDOWS
+				debug_startup_p = startup_p[1];
+#else
 				send_rexec_state(config_s[0], cfg);
-#endif /* !WINDOWS */
 				close(config_s[0]);
+#endif /* WINDOWS */
 				free(pfd);
 				return;
 			}
@@ -1888,6 +1895,31 @@ main(int ac, char **av)
 	execv(rexec_argv[0], rexec_argv);
 
 	fatal("rexec of %s failed: %s", rexec_argv[0], strerror(errno));
+#else
+	posix_spawn_file_actions_t actions;
+	posix_spawnattr_t attributes;
+	if (posix_spawn_file_actions_init(&actions) != 0 ||
+		posix_spawn_file_actions_adddup2(&actions, newsock, STDIN_FILENO) != 0 ||
+		posix_spawn_file_actions_adddup2(&actions, newsock, STDOUT_FILENO) != 0 ||
+		posix_spawn_file_actions_adddup2(&actions, debug_startup_p, REEXEC_STARTUP_PIPE_FD) != 0 ||
+		posix_spawn_file_actions_adddup2(&actions, config_s[1], REEXEC_CONFIG_PASS_FD) != 0 ||
+		posix_spawnattr_init(&attributes) != 0 ||
+		posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP) != 0 ||
+		posix_spawnattr_setpgroup(&attributes, 0) != 0)
+		error("posix_spawn initialization failed");
+	else {
+		pid_t pid;
+		if (posix_spawn(&pid, rexec_argv[0], &actions, &attributes, rexec_argv, NULL) != 0)
+			error("%s, posix_spawn failed", __func__);
+		posix_spawn_file_actions_destroy(&actions);
+		posix_spawnattr_destroy(&attributes);
+	}
+	close(debug_startup_p);
+	close(config_s[1]);
+	send_rexec_state(config_s[0], cfg);
+	close(config_s[0]);
+	close(newsock);
+	cleanup_exit(0);
 #endif /* FORK_NOT_SUPPORTED */
 }
 
