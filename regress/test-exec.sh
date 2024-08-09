@@ -96,7 +96,11 @@ SSHKEYGEN=ssh-keygen
 SSHKEYSCAN=ssh-keyscan
 SFTP=sftp
 SFTPSERVER=/usr/libexec/openssh/sftp-server
-SSHD_SESSION=/usr/libexec/sshd-session
+if [ "$os" == "windows" ]; then
+	SSHD_SESSION=sshd-session.exe
+else
+	SSHD_SESSION=/usr/libexec/sshd-session
+fi
 SCP=scp
 
 # Set by make_tmpdir() on demand (below).
