@@ -1114,6 +1114,7 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s,
 			 * Got connection.  Fork a child to handle it, unless
 			 * we are in debugging mode.
 			 */
+
 			if (debug_flag) {
 				/*
 				 * In debugging mode.  Close the listening
@@ -1817,8 +1818,10 @@ main(int ac, char **av)
 		/* Send configuration to ancestor sshd-session process */
 		if (socketpair(AF_UNIX, SOCK_STREAM, 0, config_s) == -1)
 			fatal("socketpair: %s", strerror(errno));
+#ifndef WINDOWS
 		send_rexec_state(config_s[0], cfg);
 		close(config_s[0]);
+#endif /* WINDOWS */
 	} else {
 		platform_pre_listen();
 		server_listen();
@@ -1899,9 +1902,9 @@ main(int ac, char **av)
 	posix_spawn_file_actions_t actions;
 	posix_spawnattr_t attributes;
 	if (posix_spawn_file_actions_init(&actions) != 0 ||
-		posix_spawn_file_actions_adddup2(&actions, newsock, STDIN_FILENO) != 0 ||
-		posix_spawn_file_actions_adddup2(&actions, newsock, STDOUT_FILENO) != 0 ||
-		posix_spawn_file_actions_adddup2(&actions, debug_startup_p, REEXEC_STARTUP_PIPE_FD) != 0 ||
+		(debug_flag && posix_spawn_file_actions_adddup2(&actions, newsock, STDIN_FILENO) != 0) ||
+		(debug_flag && posix_spawn_file_actions_adddup2(&actions, newsock, STDOUT_FILENO) != 0) ||
+		(debug_flag && posix_spawn_file_actions_adddup2(&actions, debug_startup_p, REEXEC_STARTUP_PIPE_FD) != 0) ||
 		posix_spawn_file_actions_adddup2(&actions, config_s[1], REEXEC_CONFIG_PASS_FD) != 0 ||
 		posix_spawnattr_init(&attributes) != 0 ||
 		posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP) != 0 ||
