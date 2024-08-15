@@ -1,7 +1,7 @@
 #	$OpenBSD: sftp-cmds.sh,v 1.20 2024/07/01 03:10:19 djm Exp $
 #	Placed in the Public Domain.
 
-# XXX - TODO: 
+# XXX - TODO:
 # - chmod / chown / chgrp
 # - -p flag for get & put
 
@@ -45,8 +45,14 @@ echo "ls ${OBJ}" | ${SFTP} -D ${SFTPSERVER} >/dev/null 2>&1 \
 # XXX always successful
 
 verbose "$tid: shell"
-echo "!echo hi there" | ${SFTP} -D ${SFTPSERVER} 2>&1 | \
-	egrep '^hi there$' >/dev/null || fail "shell failed"
+if [ "$os" == "windows" ]; then
+	# Windows output has additional text so change grep check to be less strict
+	echo "!echo hi there" | ${SFTP} -D ${SFTPSERVER} 2>&1 | \
+    	grep -E 'hi there' >/dev/null || fail "shell failed"
+else
+	echo "!echo hi there" | ${SFTP} -D ${SFTPSERVER} 2>&1 | \
+    	grep -E '^hi there$' >/dev/null || fail "shell failed"
+fi
 
 verbose "$tid: pwd"
 echo "pwd" | ${SFTP} -D ${SFTPSERVER} >/dev/null 2>&1 \

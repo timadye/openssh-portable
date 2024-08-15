@@ -1154,8 +1154,8 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s,
 				    posix_spawnattr_setpgroup(&attributes, 0) != 0)
 					error("posix_spawn initialization failed");
 				else {
-					pid_t pid;
-				 	if (posix_spawn(&pid, rexec_argv[0], &actions, &attributes, rexec_argv, NULL) != 0)
+					child = child_register(startup_p[0], *newsock);
+				 	if (posix_spawn(&child->pid, rexec_argv[0], &actions, &attributes, rexec_argv, NULL) != 0)
 				 		error("%s, posix_spawn failed", __func__);
 				 	posix_spawn_file_actions_destroy(&actions);
 				 	posix_spawnattr_destroy(&attributes);
@@ -1922,7 +1922,7 @@ main(int ac, char **av)
 	send_rexec_state(config_s[0], cfg);
 	close(config_s[0]);
 	close(newsock);
-	cleanup_exit(0);
+	cleanup_exit(255);
 #endif /* FORK_NOT_SUPPORTED */
 }
 

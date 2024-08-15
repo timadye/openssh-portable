@@ -494,7 +494,11 @@ fill_default_server_options(ServerOptions *options)
 	if (options->unused_connection_timeout == -1)
 		options->unused_connection_timeout = 0;
 	if (options->sshd_session_path == NULL)
+#ifdef WINDOWS
+		options->sshd_session_path = derelativise_path(_PATH_SSHD_SESSION);
+#else
 		options->sshd_session_path = xstrdup(_PATH_SSHD_SESSION);
+#endif /* WINDOWS */
 
 	assemble_algorithms(options);
 
@@ -3062,7 +3066,7 @@ parse_server_config(ServerOptions *options, const char *filename,
 	if (!reexec)
 		process_queued_listen_addrs(options);
 
-#ifdef WINDOWS	
+#ifdef WINDOWS
 	/* TODO - Refactor this into a platform specific post-read config processing routine.
 	 * TODO - support all forms of username, groupname.
 	 *   a) domain\groupname
