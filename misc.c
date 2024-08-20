@@ -22,7 +22,9 @@
 
 #include <sys/types.h>
 #include <sys/ioctl.h>
-//#include <sys/mman.h>
+#ifndef WINDOWS
+#include <sys/mman.h>
+#endif /* WINDOWS */
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
