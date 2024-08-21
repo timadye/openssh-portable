@@ -104,6 +104,7 @@
     <ClCompile Include="$(OpenSSH-Src-Path)openbsd-compat\strcasestr.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)openbsd-compat\strndup.c" />
     <ClCompile Include="..\..\..\openbsd-compat\bsd-pselect.c" />
+    <ClCompile Include="..\..\..\openbsd-compat\bsd-timegm.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(OpenSSH-Src-Path)openbsd-compat\base64.h" />
