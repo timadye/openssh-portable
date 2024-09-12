@@ -35,7 +35,7 @@
 #define W32_SIGUSR2             19
 #define W32_SIGBUS              20
 #define W32_SIGTRAP             21
-#define W32_SIGSYS			    22
+#define W32_SIGSYS              22
 
 /* singprocmask "how" codes*/
 #define SIG_BLOCK		0
