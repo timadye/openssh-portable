@@ -1761,8 +1761,6 @@ main(int ac, char **av)
 	rexec_argv = xcalloc(rexec_argc + 3, sizeof(char *));
 	/* Point to the sshd-session binary instead of sshd */
 	rexec_argv[0] = options.sshd_session_path;
-	extern wchar_t* __wprogdir;
-	debug("__wprogdir: %ls", __wprogdir);
 	for (i = 1; i < (u_int)rexec_argc; i++) {
 		debug("rexec_argv[%d]='%s'", i, saved_argv[i]);
 		rexec_argv[i] = saved_argv[i];
