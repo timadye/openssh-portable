@@ -1871,6 +1871,10 @@ process_server_config_line_depth(ServerOptions *options, char *line,
 		/* XXX appends to list; doesn't respect first-match-wins */
  parse_allowdenygroups:
 		while ((arg = argv_next(&ac, &av)) != NULL) {
+			if (*arg == '\0')
+				fatal("%s line %d: empty %s pattern",
+				    filename, linenum, keyword);
+			found = 1;
 #ifdef WINDOWS
 			// it can be a SID string; if it is - use localized name for that SID
 			PSID Sid = NULL;
@@ -1899,11 +1903,6 @@ process_server_config_line_depth(ServerOptions *options, char *line,
 				debug3_f("'%s' not recognized as SID", arg);
 			}
 #endif // WINDOWS
-			if (*arg == '\0' ||
-				match_user(NULL, NULL, NULL, arg) == -1)
-					fatal("%s line %d: empty %s pattern",
-					filename, linenum, keyword);
-			found = 1;
 			if (!*activep)
 				continue;
 			opt_array_append(filename, linenum, keyword,
