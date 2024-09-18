@@ -102,7 +102,7 @@
 
 /* Define if your platform needs to skip post auth
  file descriptor passing */
-/* #undef DISABLE_FD_PASSING */
+#define DISABLE_FD_PASSING
 
 /* Define if you don't want to use lastlog */
 /* #undef DISABLE_LASTLOG */
@@ -1767,4 +1767,3 @@
 #define HAVE_EVP_PKEY_GET0_RSA 1
 #define HAVE_EVP_MD_CTX_NEW 1
 #define HAVE_EVP_MD_CTX_FREE 1
-#define WITH_DSA 1
