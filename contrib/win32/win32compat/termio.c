@@ -48,8 +48,6 @@
 #include "tnnet.h"
 #include "misc_internal.h"
 
-#define TERM_IO_BUF_SIZE 2048
-
 extern int in_raw_mode;
 BOOL isFirstTime = TRUE;
 
