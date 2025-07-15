@@ -438,7 +438,6 @@
     <ClCompile Include="$(OpenSSH-Src-Path)platform-pledge.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)platform-tracing.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)platform.c" />
-    <ClCompile Include="$(OpenSSH-Src-Path)sandbox-pledge.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)contrib\win32\win32compat\ttymodes_windows.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)contrib\win32\win32compat\w32-sshfileperm.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)digest-openssl.c">
@@ -451,6 +450,7 @@
     <ClCompile Include="$(OpenSSH-Src-Path)sshbuf-io.c" />
     <ClCompile Include="..\..\..\cipher-chachapoly-libcrypto.c" />
     <ClCompile Include="..\..\..\kex-names.c" />
+    <ClCompile Include="..\..\..\kexmlkem768x25519.c" />
     <ClCompile Include="..\win32compat\spawn-ext.c" />
   </ItemGroup>
   <ItemGroup>

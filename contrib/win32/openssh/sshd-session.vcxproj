@@ -456,7 +456,6 @@
     <ClCompile Include="$(OpenSSH-Src-Path)sandbox-null.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)sandbox-rlimit.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)sandbox-seccomp-filter.c" />
-    <ClCompile Include="$(OpenSSH-Src-Path)sandbox-systrace.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)servconf.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)serverloop.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)session.c" />
