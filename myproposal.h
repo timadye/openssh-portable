@@ -27,15 +27,12 @@
 #ifdef WINDOWS
  // these should be in the same order as upstream, without the ones we don't support
 #define KEX_SERVER_KEX	\
+	"mlkem768x25519-sha256," \
 	"curve25519-sha256," \
 	"curve25519-sha256@libssh.org," \
 	"ecdh-sha2-nistp256," \
 	"ecdh-sha2-nistp384," \
-	"ecdh-sha2-nistp521," \
-	"diffie-hellman-group-exchange-sha256," \
-	"diffie-hellman-group16-sha512," \
-	"diffie-hellman-group18-sha512," \
-	"diffie-hellman-group14-sha256"
+	"ecdh-sha2-nistp521,"
 #else
 #define KEX_SERVER_KEX	\
 	"mlkem768x25519-sha256," \
@@ -45,14 +42,14 @@
 	"curve25519-sha256@libssh.org," \
 	"ecdh-sha2-nistp256," \
 	"ecdh-sha2-nistp384," \
-	"ecdh-sha2-nistp521" \
+	"ecdh-sha2-nistp521"
+#endif
 
 #define KEX_CLIENT_KEX KEX_SERVER_KEX "," \
 	"diffie-hellman-group-exchange-sha256," \
 	"diffie-hellman-group16-sha512," \
 	"diffie-hellman-group18-sha512," \
 	"diffie-hellman-group14-sha256"
-#endif
 
 #define	KEX_DEFAULT_PK_ALG	\
 	"ssh-ed25519-cert-v01@openssh.com," \
