@@ -596,10 +596,10 @@ static void
 wrap_key(struct sshkey *k)
 {
 	if (k->type == KEY_RSA)
-		RSA_set_method(k->rsa, helper_rsa);
+		RSA_set_method(k->pkey, helper_rsa);
 #if defined(OPENSSL_HAS_ECC) && defined(HAVE_EC_KEY_METHOD_NEW)
 	else if (k->type == KEY_ECDSA)
-		EC_KEY_set_method(k->ecdsa, helper_ecdsa);
+		EC_KEY_set_method(k->pkey, helper_ecdsa);
 #endif /* OPENSSL_HAS_ECC && HAVE_EC_KEY_METHOD_NEW */
 	else
 		fatal_f("unknown key type");
