@@ -81,6 +81,10 @@ void	 sshfatal(const char *, const char *, int, int,
 void	 sshlogdirect(LogLevel, int, const char *, ...)
     __attribute__((format(printf, 3, 4)));
 
+#ifdef WINDOWS
+typedef unsigned int u_int;
+#endif /* WINDOWS */
+
 struct log_ratelimit_ctx {
 	/* configuration */
 	u_int threshold;	/* events per second */
