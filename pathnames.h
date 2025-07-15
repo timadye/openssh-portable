@@ -55,6 +55,9 @@
 #define _PATH_SSHD_SESSION		"/usr/libexec/sshd-session"
 #endif /* WINDOWS */
 #endif
+#ifndef _PATH_SSHD_AUTH
+#define _PATH_SSHD_AUTH			"/usr/libexec/sshd-auth"
+#endif
 
 /*
  * The process id of the daemon listening for connections is saved here to
