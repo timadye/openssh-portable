@@ -28,7 +28,9 @@
 #include "includes.h"
 
 #include <sys/types.h>
+#ifndef WINDOWS
 #include <sys/mman.h>
+#endif
 #include <netinet/in.h>
 
 #ifdef WITH_OPENSSL
@@ -67,6 +69,7 @@
 #endif
 #ifdef WINDOWS
 #include <lmcons.h>
+#include <Windows.h>
 #endif
 
 #include "openbsd-compat/openssl-compat.h"
@@ -774,12 +777,20 @@ sshkey_prekey_alloc(u_char **prekeyp, size_t len)
 	u_char *prekey;
 
 	*prekeyp = NULL;
+#ifdef WINDOWS
+	prekey = VirtualAlloc(NULL, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	if (prekey == NULL) {
+		return SSH_ERR_SYSTEM_ERROR;
+	}
+	VirtualLock(prekey, len);
+#else
 	if ((prekey = mmap(NULL, len, PROT_READ|PROT_WRITE,
 	    MAP_ANON|MAP_PRIVATE|PREKEY_MMAP_FLAG, -1, 0)) == MAP_FAILED)
 		return SSH_ERR_SYSTEM_ERROR;
 #if defined(MADV_DONTDUMP) && !defined(MAP_CONCEAL) && !defined(MAP_NOCORE)
 	(void)madvise(prekey, len, MADV_DONTDUMP);
 #endif
+#endif /* WINDOWS */
 	*prekeyp = prekey;
 	return 0;
 }
@@ -789,7 +800,13 @@ sshkey_prekey_free(void *prekey, size_t len)
 {
 	if (prekey == NULL)
 		return;
+#ifdef WINDOWS
+	SecureZeroMemory(prekey, len);
+	VirtualUnlock(prekey, len);
+	VirtualFree(prekey, 0, MEM_RELEASE);
+#else
 	munmap(prekey, len);
+#endif /* WINDOWS */
 }
 
 static void
