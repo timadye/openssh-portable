@@ -50,7 +50,9 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#ifndef WINDOWS
 #include <sys/utsname.h>
+#endif /* WINDOWS */
 
 #include <ctype.h>
 #include <errno.h>
@@ -591,7 +593,7 @@ process_config_files(const char *host_name, struct passwd *pw,
 		 *	This is not desirable. For windows, We make sure the systemwide sshd_config file is not editable by non-admin users.
 		 */
 		(void)read_config_file(_PATH_HOST_CONFIG_FILE, pw,
-			host, host_name, &options, SSHCONF_CHECKPERM |
+			host, host_name, cmd, &options, SSHCONF_CHECKPERM |
 			(final_pass ? SSHCONF_FINAL : 0), want_final_pass);
 #else
 		(void)read_config_file(_PATH_HOST_CONFIG_FILE, pw,
@@ -696,7 +698,9 @@ main(int ac, char **av)
 	struct addrinfo *addrs = NULL;
 	size_t n, len;
 	u_int j;
+#ifndef WINDOWS
 	struct utsname utsname;
+#endif /* WINDOWS */
 	struct ssh_conn_info *cinfo = NULL;
 
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
@@ -1219,12 +1223,14 @@ main(int ac, char **av)
 	    !use_syslog);
 
 	debug("%s, %s", SSH_RELEASE, SSH_OPENSSL_VERSION);
+#ifndef WINDOWS
 	if (uname(&utsname) != 0) {
 		memset(&utsname, 0, sizeof(utsname));
 		strlcpy(utsname.sysname, "UNKNOWN", sizeof(utsname.sysname));
 	}
 	debug3("Running on %s %s %s %s", utsname.sysname, utsname.release,
 	    utsname.version, utsname.machine);
+#endif /* WINDOWS */
 	debug3("Started with: %s", args);
 	free(args);
 

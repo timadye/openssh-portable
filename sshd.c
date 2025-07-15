@@ -38,7 +38,9 @@
 #include "openbsd-compat/sys-tree.h"
 #include "openbsd-compat/sys-queue.h"
 #include <sys/wait.h>
+#ifndef WINDOWS
 #include <sys/utsname.h>
+#endif /* WINDOWS */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1424,7 +1426,9 @@ main(int ac, char **av)
 	struct sshkey *key;
 	struct sshkey *pubkey;
 	struct connection_info connection_info;
-	struct utsname utsname;
+#ifndef WINDOWS
+	struct utsname utsname
+#endif /* !WINDOWS */
 	sigset_t sigmask;
 
 	memset(&connection_info, 0, sizeof(connection_info));
@@ -1631,12 +1635,14 @@ main(int ac, char **av)
 		    "test mode (-T)");
 
 	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
+#ifndef WINDOWS
 	if (uname(&utsname) != 0) {
 		memset(&utsname, 0, sizeof(utsname));
 		strlcpy(utsname.sysname, "UNKNOWN", sizeof(utsname.sysname));
 	}
 	debug3("Running on %s %s %s %s", utsname.sysname, utsname.release,
 	    utsname.version, utsname.machine);
+#endif /* WINDOWS */
 	debug3("Started with: %s", args);
 	free(args);
 
