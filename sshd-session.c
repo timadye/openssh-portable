@@ -232,55 +232,6 @@ mm_is_monitor(void)
 }
 
 #ifdef WINDOWS
-/* copied from sshd.c */
-static struct sshbuf*
-pack_hostkeys(void)
-{
-	struct sshbuf* keybuf = NULL, * hostkeys = NULL;
-	int r;
-	u_int i;
-
-	if ((keybuf = sshbuf_new()) == NULL ||
-		(hostkeys = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new failed");
-
-	/* pack hostkeys into a string. Empty key slots get empty strings */
-	for (i = 0; i < options.num_host_key_files; i++) {
-		/* private key */
-		sshbuf_reset(keybuf);
-		if (sensitive_data.host_keys[i] != NULL &&
-			(r = sshkey_private_serialize(sensitive_data.host_keys[i],
-				keybuf)) != 0)
-			fatal_fr(r, "serialize hostkey private");
-		if ((r = sshbuf_put_stringb(hostkeys, keybuf)) != 0)
-			fatal_fr(r, "compose hostkey private");
-		/* public key */
-		if (sensitive_data.host_pubkeys[i] != NULL) {
-			if ((r = sshkey_puts(sensitive_data.host_pubkeys[i],
-				hostkeys)) != 0)
-				fatal_fr(r, "compose hostkey public");
-		}
-		else {
-			if ((r = sshbuf_put_string(hostkeys, NULL, 0)) != 0)
-				fatal_fr(r, "compose hostkey empty public");
-		}
-		/* cert */
-		if (sensitive_data.host_certificates[i] != NULL) {
-			if ((r = sshkey_puts(
-				sensitive_data.host_certificates[i],
-				hostkeys)) != 0)
-				fatal_fr(r, "compose host cert");
-		}
-		else {
-			if ((r = sshbuf_put_string(hostkeys, NULL, 0)) != 0)
-				fatal_fr(r, "compose host cert empty");
-		}
-	}
-
-	sshbuf_free(keybuf);
-	return hostkeys;
-}
-
 static void
 send_config_state(int fd, struct sshbuf* conf)
 {
@@ -726,11 +677,12 @@ privsep_preauth(struct ssh *ssh)
 		fcntl(pmonitor->m_log_sendfd, F_SETFD, FD_CLOEXEC);
 
 		/* Arrange for logging to be sent to the monitor */
-		set_log_handler(mm_log_handler, pmonitor);
+		//TODO: implement /*child*/ part of below using sshd-auth
+		//set_log_handler(mm_log_handler, pmonitor);
 
-		privsep_preauth_child();
-		setproctitle("%s", "[net]");
-		return 0;
+		//privsep_preauth_child();
+		//setproctitle("%s", "[net]");
+		//return 0;
 	}
 	else { /* parent */
 		posix_spawn_file_actions_t actions;
@@ -1352,7 +1304,6 @@ main(int ac, char **av)
 	sigset_t sigmask;
 	uint64_t timing_secret = 0;
 	struct itimerval itv;
-
 	sigemptyset(&sigmask);
 	sigprocmask(SIG_SETMASK, &sigmask, NULL);
 
