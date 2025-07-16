@@ -129,9 +129,6 @@ ServerOptions options;
  * the first connection.
  */
 int debug_flag = 0;
-#ifdef WINDOWS
-debug_startup_p = -1;
-#endif /* WINDOWS */
 
 /* Saved arguments to main(). */
 static char **saved_argv;
@@ -1247,17 +1244,10 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s,
 				close_listen_socks();
 				*sock_in = *newsock;
 				*sock_out = *newsock;
-				close(startup_p[0]);
 #ifndef WINDOWS
-				close(startup_p[1]);
-#endif /* WINDOWS */
-				startup_pipe = -1;
-#ifdef WINDOWS
-				debug_startup_p = startup_p[1];
-#else
 				send_rexec_state(config_s[0]);
 				close(config_s[0]);
-#endif /* WINDOWS */
+#endif /* !WINDOWS */
 				free(pfd);
 				return;
 			}
@@ -1269,14 +1259,13 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s,
 				if (posix_spawn_file_actions_init(&actions) != 0 ||
 				    posix_spawn_file_actions_adddup2(&actions, *newsock, STDIN_FILENO) != 0 ||
 				    posix_spawn_file_actions_adddup2(&actions, *newsock, STDOUT_FILENO) != 0 ||
-				    posix_spawn_file_actions_adddup2(&actions, startup_p[1], REEXEC_STARTUP_PIPE_FD) != 0 ||
 				    posix_spawn_file_actions_adddup2(&actions, config_s[1], REEXEC_CONFIG_PASS_FD) != 0 ||
 				    posix_spawnattr_init(&attributes) != 0 ||
 				    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP) != 0 ||
 				    posix_spawnattr_setpgroup(&attributes, 0) != 0)
 					error("posix_spawn initialization failed");
 				else {
-					child = child_register(startup_p[0], *newsock);
+					child = child_register(config_s[0], *newsock);
 				 	if (posix_spawn(&child->pid, rexec_argv[0], &actions, &attributes, rexec_argv, NULL) != 0)
 				 		error("%s, posix_spawn failed", __func__);
 				 	posix_spawn_file_actions_destroy(&actions);
@@ -2037,7 +2026,6 @@ main(int ac, char **av)
 	if (posix_spawn_file_actions_init(&actions) != 0 ||
 		(debug_flag && posix_spawn_file_actions_adddup2(&actions, newsock, STDIN_FILENO) != 0) ||
 		(debug_flag && posix_spawn_file_actions_adddup2(&actions, newsock, STDOUT_FILENO) != 0) ||
-		(debug_flag && posix_spawn_file_actions_adddup2(&actions, debug_startup_p, REEXEC_STARTUP_PIPE_FD) != 0) ||
 		posix_spawn_file_actions_adddup2(&actions, config_s[1], REEXEC_CONFIG_PASS_FD) != 0 ||
 		posix_spawnattr_init(&attributes) != 0 ||
 		posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP) != 0 ||
@@ -2050,9 +2038,8 @@ main(int ac, char **av)
 		posix_spawn_file_actions_destroy(&actions);
 		posix_spawnattr_destroy(&attributes);
 	}
-	close(debug_startup_p);
 	close(config_s[1]);
-	send_rexec_state(config_s[0], cfg);
+	send_rexec_state(config_s[0]);
 	close(config_s[0]);
 	close(newsock);
 	cleanup_exit(255);
