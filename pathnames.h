@@ -56,7 +56,11 @@
 #endif /* WINDOWS */
 #endif
 #ifndef _PATH_SSHD_AUTH
+#ifdef WINDOWS
+#define _PATH_SSHD_AUTH			"sshd-auth.exe" /* PATH looks in same directory as sshd automatically */
+#else /* WINDOWS */
 #define _PATH_SSHD_AUTH			"/usr/libexec/sshd-auth"
+#endif /* WINDOWS */
 #endif
 
 /*

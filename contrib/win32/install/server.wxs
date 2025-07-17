@@ -10,6 +10,9 @@
                 <File Name="ssh-shellhost.exe" KeyPath="yes" />
             </Component>
             <Component>
+                <File Name="sshd-auth.exe" KeyPath="yes" />
+            </Component>
+            <Component>
                 <File Name="sshd-session.exe" KeyPath="yes" />
             </Component>
             <Component>

@@ -676,13 +676,14 @@ privsep_preauth(struct ssh *ssh)
 		fcntl(pmonitor->m_recvfd, F_SETFD, FD_CLOEXEC);
 		fcntl(pmonitor->m_log_sendfd, F_SETFD, FD_CLOEXEC);
 
+		debug("REACHED PREAUTH STEP");
 		/* Arrange for logging to be sent to the monitor */
 		//TODO: implement /*child*/ part of below using sshd-auth
 		//set_log_handler(mm_log_handler, pmonitor);
 
 		//privsep_preauth_child();
 		//setproctitle("%s", "[net]");
-		//return 0;
+		return 0;
 	}
 	else { /* parent */
 		posix_spawn_file_actions_t actions;
