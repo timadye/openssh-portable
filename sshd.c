@@ -856,11 +856,14 @@ send_rexec_state(int fd)
 	struct sshbuf *keys;
 	u_int mlen;
 	pid_t pid;
-
+#ifdef FORK_NOT_SUPPORTED
+	// TODO: Implement a Windows-specific way to handle debug mode
+#else /* FORK_NOT_SUPPORTED */
 	if ((pid = fork()) == -1)
 		fatal_f("fork failed: %s", strerror(errno));
 	if (pid != 0)
 		return;
+#endif /* FORK_NOT_SUPPORTED */
 
 	debug3_f("entering fd = %d config len %zu", fd,
 	    sshbuf_len(config));
