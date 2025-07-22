@@ -125,8 +125,6 @@
 
 /* Privilege separation related spawn fds */
 #ifdef WINDOWS
-#define PRIVSEP_MONITOR_FD		(STDERR_FILENO + 1)
-#define PRIVSEP_LOG_FD			(STDERR_FILENO + 2)
 #define PRIVSEP_UNAUTH_MIN_FREE_FD	(PRIVSEP_LOG_FD + 1)
 #define PRIVSEP_AUTH_MIN_FREE_FD	(PRIVSEP_LOG_FD + 1)
 #endif /* WINDOWS */
@@ -676,14 +674,50 @@ privsep_preauth(struct ssh *ssh)
 		fcntl(pmonitor->m_recvfd, F_SETFD, FD_CLOEXEC);
 		fcntl(pmonitor->m_log_sendfd, F_SETFD, FD_CLOEXEC);
 
-		debug("REACHED PREAUTH STEP");
-		/* Arrange for logging to be sent to the monitor */
-		//TODO: implement /*child*/ part of below using sshd-auth
-		//set_log_handler(mm_log_handler, pmonitor);
+		/*
+		 * Arrange unpriv-preauth child process fds:
+		 * 0, 1 network socket
+		 * 2 optional stderr
+		 * 3 reserved
+		 * 4 monitor message socket
+		 * 5 monitor logging socket
+		 *
+		 * We know that the monitor sockets will have fds > 4 because
+		 * of the reserved fds in main()
+		 */
 
-		//privsep_preauth_child();
-		//setproctitle("%s", "[net]");
-		return 0;
+		if (ssh_packet_get_connection_in(ssh) != STDIN_FILENO &&
+			dup2(ssh_packet_get_connection_in(ssh), STDIN_FILENO) == -1)
+			fatal("dup2 stdin failed: %s", strerror(errno));
+		if (ssh_packet_get_connection_out(ssh) != STDOUT_FILENO &&
+			dup2(ssh_packet_get_connection_out(ssh),
+				STDOUT_FILENO) == -1)
+			fatal("dup2 stdout failed: %s", strerror(errno));
+		/* leave stderr as-is */
+		log_redirect_stderr_to(NULL); /* dup can clobber log fd */
+		if (pmonitor->m_recvfd != PRIVSEP_MONITOR_FD &&
+			dup2(pmonitor->m_recvfd, PRIVSEP_MONITOR_FD) == -1)
+			fatal("dup2 monitor fd: %s", strerror(errno));
+		if (pmonitor->m_log_sendfd != PRIVSEP_LOG_FD &&
+			dup2(pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) == -1)
+			fatal("dup2 log fd: %s", strerror(errno));
+		closefrom(PRIVSEP_MIN_FREE_FD);
+
+		posix_spawn_file_actions_t actions;
+		posix_spawnattr_t attributes;
+		if (posix_spawn_file_actions_init(&actions) != 0 ||
+			posix_spawn_file_actions_adddup2(&actions, io_sock_in, STDIN_FILENO) != 0 ||
+			posix_spawn_file_actions_adddup2(&actions, io_sock_out, STDOUT_FILENO) != 0 ||
+			posix_spawn_file_actions_adddup2(&actions, pmonitor->m_recvfd, PRIVSEP_MONITOR_FD) != 0 ||
+			posix_spawn_file_actions_adddup2(&actions, pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) != 0)
+			fatal("posix_spawn initialization failed");
+		else {
+			pid_t pid;
+			if (posix_spawn(&pid, options.sshd_auth_path, &actions, &attributes, saved_argv, NULL) != 0)
+				error("%s, posix_spawn failed", __func__);
+			posix_spawn_file_actions_destroy(&actions);
+			posix_spawnattr_destroy(&attributes);
+		}
 	}
 	else { /* parent */
 		posix_spawn_file_actions_t actions;
@@ -695,13 +729,11 @@ privsep_preauth(struct ssh *ssh)
 		    posix_spawn_file_actions_adddup2(&actions, pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) != 0 )
 			fatal("posix_spawn initialization failed");
 
-		{
-			char** argv = privsep_child_cmdline(0);
-			if (__posix_spawn_asuser(&pid, argv[0], &actions, NULL, argv, NULL, SSH_PRIVSEP_USER) != 0)
-				fatal("%s, fork of unprivileged child failed", __func__);
+		char** argv = privsep_child_cmdline(0);
+		if (__posix_spawn_asuser(&pid, argv[0], &actions, NULL, argv, NULL, SSH_PRIVSEP_USER) != 0)
+			fatal("%s, fork of unprivileged child failed", __func__);
 
-			posix_spawn_file_actions_destroy(&actions);
-		}
+		posix_spawn_file_actions_destroy(&actions);
 
 		debug2("Network child is on pid %ld", (long)pid);
 
@@ -1525,12 +1557,12 @@ main(int ac, char **av)
 		fatal("sshbuf_new config buf failed");
 	setproctitle("%s", "[rexeced]");
 #ifdef WINDOWS
-	if (privsep_unauth_child || privsep_auth_child) {
-		recv_rexec_state(PRIVSEP_MONITOR_FD, cfg, &timing_secret); //TODO - should starup_pipe be closed as above ?B
-	}
-	else {
-		recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg, &timing_secret);
-	}
+	//if (privsep_unauth_child || privsep_auth_child) {
+	//	recv_rexec_state(PRIVSEP_MONITOR_FD, cfg, &timing_secret); //TODO - should starup_pipe be closed as above ?B
+	//}
+	//else {
+	//	recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg, &timing_secret);
+	//}
 #else /* WINDOWS */
 	recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg, &timing_secret);
 #endif /* WINDOWS */
