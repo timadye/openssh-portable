@@ -230,10 +230,110 @@ mm_is_monitor(void)
 }
 
 #ifdef WINDOWS
-static void
-send_config_state(int fd, struct sshbuf* config)
+static struct sshbuf*
+pack_hostkeys_for_child(void)
 {
-	/* copied from send_rexec_state in sshd.c */
+	/* copied from sshd.c */
+	struct sshbuf* m = NULL, * keybuf = NULL, * hostkeys = NULL;
+	int r;
+	u_int i;
+	size_t len;
+
+	if ((m = sshbuf_new()) == NULL ||
+		(keybuf = sshbuf_new()) == NULL ||
+		(hostkeys = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new failed");
+
+	/* pack hostkeys into a string. Empty key slots get empty strings */
+	for (i = 0; i < options.num_host_key_files; i++) {
+		/* private key */
+		sshbuf_reset(keybuf);
+		if (sensitive_data.host_keys[i] != NULL &&
+			(r = sshkey_private_serialize(sensitive_data.host_keys[i],
+				keybuf)) != 0)
+			fatal_fr(r, "serialize hostkey private");
+		if ((r = sshbuf_put_stringb(hostkeys, keybuf)) != 0)
+			fatal_fr(r, "compose hostkey private");
+		/* public key */
+		if (sensitive_data.host_pubkeys[i] != NULL) {
+			if ((r = sshkey_puts(sensitive_data.host_pubkeys[i],
+				hostkeys)) != 0)
+				fatal_fr(r, "compose hostkey public");
+		}
+		else {
+			if ((r = sshbuf_put_string(hostkeys, NULL, 0)) != 0)
+				fatal_fr(r, "compose hostkey empty public");
+		}
+		/* cert */
+		if (sensitive_data.host_certificates[i] != NULL) {
+			if ((r = sshkey_puts(
+				sensitive_data.host_certificates[i],
+				hostkeys)) != 0)
+				fatal_fr(r, "compose host cert");
+		}
+		else {
+			if ((r = sshbuf_put_string(hostkeys, NULL, 0)) != 0)
+				fatal_fr(r, "compose host cert empty");
+		}
+	}
+
+	if ((r = sshbuf_put_u32(m, 0)) != 0 ||
+		(r = sshbuf_put_u8(m, 0)) != 0 ||
+		(r = sshbuf_put_stringb(m, hostkeys)) != 0)
+		fatal_fr(r, "compose message");
+	if ((len = sshbuf_len(m)) < 5 || len > 0xffffffff)
+		fatal_f("bad length %zu", len);
+	POKE_U32(sshbuf_mutable_ptr(m), len - 4);
+
+	sshbuf_free(keybuf);
+	sshbuf_free(hostkeys);
+	return m;
+}
+
+static struct sshbuf*
+pack_config(struct sshbuf* conf)
+{
+	/* copied from sshd.c */
+	struct sshbuf* m = NULL, * inc = NULL;
+	struct include_item* item = NULL;
+	size_t len;
+	int r;
+
+	debug3_f("d config len %zu", sshbuf_len(conf));
+
+	if ((m = sshbuf_new()) == NULL ||
+		(inc = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new failed");
+
+	/* pack includes into a string */
+	TAILQ_FOREACH(item, &includes, entry) {
+		if ((r = sshbuf_put_cstring(inc, item->selector)) != 0 ||
+			(r = sshbuf_put_cstring(inc, item->filename)) != 0 ||
+			(r = sshbuf_put_stringb(inc, item->contents)) != 0)
+			fatal_fr(r, "compose includes");
+	}
+
+	if ((r = sshbuf_put_u32(m, 0)) != 0 ||
+		(r = sshbuf_put_u8(m, 0)) != 0 ||
+		(r = sshbuf_put_stringb(m, conf)) != 0 ||
+		(r = sshbuf_put_u64(m, options.timing_secret)) != 0 ||
+		(r = sshbuf_put_stringb(m, inc)) != 0)
+		fatal_fr(r, "compose config");
+
+	if ((len = sshbuf_len(m)) < 5 || len > 0xffffffff)
+		fatal_f("bad length %zu", len);
+	POKE_U32(sshbuf_mutable_ptr(m), len - 4);
+
+	sshbuf_free(inc);
+
+	debug3_f("done");
+	return m;
+}
+
+static void
+send_config_state(int fd, struct sshbuf* conf)
+{
+//	/* copied from send_rexec_state in sshd.c */
 //	struct sshbuf* m = NULL, * inc = NULL, * hostkeys = NULL;
 //	struct include_item* item = NULL;
 //	int r, sz;
@@ -293,7 +393,9 @@ send_config_state(int fd, struct sshbuf* config)
 	/* copied from send_rexec_state in sshd.c */
 	struct sshbuf* keys;
 	u_int mlen;
-#ifndef WINDOWS
+#ifdef WINDOWS
+	struct sshbuf* config = pack_config(conf);
+#else
 	pid_t pid;
 
 	if ((pid = fork()) == -1)
@@ -308,7 +410,7 @@ send_config_state(int fd, struct sshbuf* config)
 	if (atomicio(vwrite, fd, sshbuf_mutable_ptr(config), mlen) != mlen)
 		error_f("write: %s", strerror(errno));
 
-	keys = pack_hostkeys();
+	keys = pack_hostkeys_for_child();
 	mlen = sshbuf_len(keys);
 	if (atomicio(vwrite, fd, sshbuf_mutable_ptr(keys), mlen) != mlen)
 		error_f("write: %s", strerror(errno));
