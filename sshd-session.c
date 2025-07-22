@@ -231,65 +231,93 @@ mm_is_monitor(void)
 
 #ifdef WINDOWS
 static void
-send_config_state(int fd, struct sshbuf* conf)
+send_config_state(int fd, struct sshbuf* config)
 {
 	/* copied from send_rexec_state in sshd.c */
-	struct sshbuf* m = NULL, * inc = NULL, * hostkeys = NULL;
-	struct include_item* item = NULL;
-	int r, sz;
-
-	debug3_f("entering fd = %d config len %zu", fd,
-		sshbuf_len(conf));
-
-	if ((m = sshbuf_new()) == NULL ||
-		(inc = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new failed");
-
-	/* pack includes into a string */
-	TAILQ_FOREACH(item, &includes, entry) {
-		if ((r = sshbuf_put_cstring(inc, item->selector)) != 0 ||
-			(r = sshbuf_put_cstring(inc, item->filename)) != 0 ||
-			(r = sshbuf_put_stringb(inc, item->contents)) != 0)
-			fatal_fr(r, "compose includes");
-	}
-
-	hostkeys = pack_hostkeys();
-
-	/*
-	 * Protocol from reexec master to child:
-	 *	string	configuration
-	 *	uint64	timing_secret
-	 *	string	host_keys[] {
-	 *		string private_key
-	 *		string public_key
-	 *		string certificate
-	 *	}
-	 *	string	included_files[] {
-	 *		string	selector
-	 *		string	filename
-	 *		string	contents
-	 *	}
-	 */
-	if ((r = sshbuf_put_stringb(m, conf)) != 0 ||
-		(r = sshbuf_put_u64(m, options.timing_secret)) != 0 ||
-		(r = sshbuf_put_stringb(m, hostkeys)) != 0 ||
-		(r = sshbuf_put_stringb(m, inc)) != 0)
-		fatal_fr(r, "compose config");
-
+//	struct sshbuf* m = NULL, * inc = NULL, * hostkeys = NULL;
+//	struct include_item* item = NULL;
+//	int r, sz;
+//
+//	debug3_f("entering fd = %d config len %zu", fd,
+//		sshbuf_len(conf));
+//
+//	if ((m = sshbuf_new()) == NULL ||
+//		(inc = sshbuf_new()) == NULL)
+//		fatal_f("sshbuf_new failed");
+//
+//	/* pack includes into a string */
+//	TAILQ_FOREACH(item, &includes, entry) {
+//		if ((r = sshbuf_put_cstring(inc, item->selector)) != 0 ||
+//			(r = sshbuf_put_cstring(inc, item->filename)) != 0 ||
+//			(r = sshbuf_put_stringb(inc, item->contents)) != 0)
+//			fatal_fr(r, "compose includes");
+//	}
+//
+//	hostkeys = pack_hostkeys();
+//
+//	/*
+//	 * Protocol from reexec master to child:
+//	 *	string	configuration
+//	 *	uint64	timing_secret
+//	 *	string	host_keys[] {
+//	 *		string private_key
+//	 *		string public_key
+//	 *		string certificate
+//	 *	}
+//	 *	string	included_files[] {
+//	 *		string	selector
+//	 *		string	filename
+//	 *		string	contents
+//	 *	}
+//	 */
+//	if ((r = sshbuf_put_stringb(m, conf)) != 0 ||
+//		(r = sshbuf_put_u64(m, options.timing_secret)) != 0 ||
+//		(r = sshbuf_put_stringb(m, hostkeys)) != 0 ||
+//		(r = sshbuf_put_stringb(m, inc)) != 0)
+//		fatal_fr(r, "compose config");
+//
+//#ifndef WINDOWS
+//	/* We need to fit the entire message inside the socket send buffer */
+//	sz = ROUNDUP(sshbuf_len(m) + 5, 16 * 1024);
+//	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz) == -1)
+//		fatal_f("setsockopt SO_SNDBUF: %s", strerror(errno));
+//#endif /* WINDOWS */
+//	if (ssh_msg_send(fd, 0, m) == -1)
+//		error_f("ssh_msg_send failed");
+//
+//	sshbuf_free(m);
+//	sshbuf_free(inc);
+//	sshbuf_free(hostkeys);
+//
+//	debug3_f("done");
+	/* copied from send_rexec_state in sshd.c */
+	struct sshbuf* keys;
+	u_int mlen;
 #ifndef WINDOWS
-	/* We need to fit the entire message inside the socket send buffer */
-	sz = ROUNDUP(sshbuf_len(m) + 5, 16 * 1024);
-	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz) == -1)
-		fatal_f("setsockopt SO_SNDBUF: %s", strerror(errno));
-#endif /* WINDOWS */
-	if (ssh_msg_send(fd, 0, m) == -1)
-		error_f("ssh_msg_send failed");
+	pid_t pid;
 
-	sshbuf_free(m);
-	sshbuf_free(inc);
-	sshbuf_free(hostkeys);
+	if ((pid = fork()) == -1)
+		fatal_f("fork failed: %s", strerror(errno));
+	if (pid != 0)
+		return;
+#endif /* !WINDOWS */
+	debug3_f("entering fd = %d config len %zu", fd,
+		sshbuf_len(config));
 
+	mlen = sshbuf_len(config);
+	if (atomicio(vwrite, fd, sshbuf_mutable_ptr(config), mlen) != mlen)
+		error_f("write: %s", strerror(errno));
+
+	keys = pack_hostkeys();
+	mlen = sshbuf_len(keys);
+	if (atomicio(vwrite, fd, sshbuf_mutable_ptr(keys), mlen) != mlen)
+		error_f("write: %s", strerror(errno));
+
+	sshbuf_free(keys);
 	debug3_f("done");
+#ifndef WINDOWS
+	exit(0);
+#endif /* !WINDOWS */
 }
 
 static void
@@ -729,8 +757,9 @@ privsep_preauth(struct ssh *ssh)
 		    posix_spawn_file_actions_adddup2(&actions, pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) != 0 )
 			fatal("posix_spawn initialization failed");
 
-		char** argv = privsep_child_cmdline(0);
-		if (__posix_spawn_asuser(&pid, argv[0], &actions, NULL, argv, NULL, SSH_PRIVSEP_USER) != 0)
+		//char** argv = privsep_child_cmdline(0);
+		// if (__posix_spawn_asuser(&pid, argv[0], &actions, NULL, argv, NULL, SSH_PRIVSEP_USER) != 0)
+		if (__posix_spawn_asuser(&pid, options.sshd_auth_path, &actions, NULL, saved_argv, NULL, SSH_PRIVSEP_USER) != 0)
 			fatal("%s, fork of unprivileged child failed", __func__);
 
 		posix_spawn_file_actions_destroy(&actions);
@@ -749,8 +778,8 @@ privsep_preauth(struct ssh *ssh)
 
 		close(pmonitor->m_recvfd);
 		close(pmonitor->m_log_sendfd);
-		send_config_state(pmonitor->m_sendfd, cfg);
-		send_idexch_state(ssh, pmonitor->m_sendfd);
+		//send_config_state(pmonitor->m_sendfd, cfg);
+		//send_idexch_state(ssh, pmonitor->m_sendfd);
 		monitor_child_preauth(ssh, pmonitor);
 		while (waitpid(pid, &status, 0) < 0) {
 			if (errno == EINTR)
@@ -870,21 +899,18 @@ privsep_postauth(struct ssh *ssh, Authctxt *authctxt)
 		if (posix_spawn_file_actions_init(&actions) != 0 ||
 		    posix_spawn_file_actions_adddup2(&actions, io_sock_in, STDIN_FILENO) != 0 ||
 		    posix_spawn_file_actions_adddup2(&actions, io_sock_out, STDOUT_FILENO) != 0 ||
-#ifdef WINDOWS
 			/*Allow authenticated child process to foward log messages to parent for processing*/
 		    posix_spawn_file_actions_adddup2(&actions, pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) != 0 ||
-#endif
 		    posix_spawn_file_actions_adddup2(&actions, pmonitor->m_recvfd, PRIVSEP_MONITOR_FD) != 0)
 			fatal("posix_spawn initialization failed");
 
-		{
-			char** argv = privsep_child_cmdline(1);
-			if (__posix_spawn_asuser(&pmonitor->m_pid, argv[0], &actions, NULL, argv, NULL, authctxt->pw->pw_name) != 0)
-				fatal("fork of unprivileged child failed");
-			posix_spawn_file_actions_destroy(&actions);
-		}
+		char** argv = privsep_child_cmdline(1);
+		if (__posix_spawn_asuser(&pmonitor->m_pid, argv[0], &actions, NULL, argv, NULL, authctxt->pw->pw_name) != 0)
+			fatal("fork of unprivileged child failed");
+		posix_spawn_file_actions_destroy(&actions);
 
 		verbose("User child is on pid %ld", (long)pmonitor->m_pid);
+		//sshbuf_reset(loginmsg);
 		send_config_state(pmonitor->m_sendfd, cfg);
 		send_idexch_state(ssh, pmonitor->m_sendfd);
 		send_autxctx_state(authctxt, pmonitor->m_sendfd);
@@ -1557,12 +1583,12 @@ main(int ac, char **av)
 		fatal("sshbuf_new config buf failed");
 	setproctitle("%s", "[rexeced]");
 #ifdef WINDOWS
-	//if (privsep_unauth_child || privsep_auth_child) {
-	//	recv_rexec_state(PRIVSEP_MONITOR_FD, cfg, &timing_secret); //TODO - should starup_pipe be closed as above ?B
-	//}
-	//else {
-	//	recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg, &timing_secret);
-	//}
+	if (privsep_unauth_child || privsep_auth_child) {
+		recv_rexec_state(PRIVSEP_MONITOR_FD, cfg, &timing_secret); //TODO - should starup_pipe be closed as above ?B
+	}
+	else {
+		recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg, &timing_secret);
+	}
 #else /* WINDOWS */
 	recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg, &timing_secret);
 #endif /* WINDOWS */

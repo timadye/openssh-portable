@@ -84,9 +84,6 @@
     <ClCompile Include="$(OpenSSH-Src-Path)loginrec.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(OpenSSH-Src-Path)monitor.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="$(OpenSSH-Src-Path)monitor_wrap.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -118,9 +115,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenSSH-Src-Path)sftp-common.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(OpenSSH-Src-Path)sshd-session.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenSSH-Src-Path)sshlogin.c">
@@ -156,10 +150,13 @@
     <ClCompile Include="..\..\..\auth2-methods.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\win32compat\wmain_sshd-session.c">
+    <ClCompile Include="..\..\..\platform-listen.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\platform-listen.c">
+    <ClCompile Include="..\win32compat\wmain_sshd-auth.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\sshd-auth.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

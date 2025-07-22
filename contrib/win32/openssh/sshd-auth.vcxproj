@@ -448,7 +448,6 @@
     <ClCompile Include="$(OpenSSH-Src-Path)gss-serv-krb5.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)gss-serv.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)loginrec.c" />
-    <ClCompile Include="$(OpenSSH-Src-Path)monitor.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)monitor_wrap.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)platform.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)sandbox-capsicum.c" />
@@ -461,7 +460,6 @@
     <ClCompile Include="$(OpenSSH-Src-Path)session.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)sftp-common.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)sshlogin.c" />
-    <ClCompile Include="$(OpenSSH-Src-Path)sshd-session.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)contrib\win32\win32compat\win32_groupaccess.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)contrib\win32\win32compat\win32_sshpty.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)contrib\win32\win32compat\w32-doexec.c" />
@@ -471,9 +469,10 @@
     <ClCompile Include="..\..\..\platform-listen.c" />
     <ClCompile Include="..\..\..\srclimit.c" />
     <ClCompile Include="..\..\..\ssh-sk-client.c" />
+    <ClCompile Include="..\..\..\sshd-auth.c" />
     <ClCompile Include="..\..\..\sshkey.c" />
     <ClCompile Include="..\win32compat\win32-utf8.c" />
-    <ClCompile Include="..\win32compat\wmain_sshd-session.c" />
+    <ClCompile Include="..\win32compat\wmain_sshd-auth.c" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="version.rc" />

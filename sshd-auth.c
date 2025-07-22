@@ -629,6 +629,10 @@ main(int ac, char **av)
 	pmonitor->m_recvfd = PRIVSEP_MONITOR_FD;
 	pmonitor->m_log_sendfd = PRIVSEP_LOG_FD;
 	set_log_handler(mm_log_handler, pmonitor);
+#ifdef WINDOWS
+	fcntl(pmonitor->m_recvfd, F_SETFD, FD_CLOEXEC);
+	fcntl(pmonitor->m_log_sendfd, F_SETFD, FD_CLOEXEC);
+#endif /* WINDOWS */
 
 	/* Check that there are no remaining arguments. */
 	if (optind < ac) {
