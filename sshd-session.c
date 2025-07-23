@@ -1039,7 +1039,6 @@ privsep_postauth(struct ssh *ssh, Authctxt *authctxt)
 	close(pmonitor->m_log_sendfd);
 	pmonitor->m_log_sendfd = PRIVSEP_LOG_FD;
 	fcntl(pmonitor->m_log_sendfd, F_SETFD, FD_CLOEXEC);
-
 	/* Arrange for logging to be sent to the monitor */
 	set_log_handler(mm_log_handler, pmonitor);
 #endif
@@ -1453,7 +1452,11 @@ main(int ac, char **av)
 	struct ssh *ssh = NULL;
 	extern char *optarg;
 	extern int optind;
+#ifdef WINDOWS
+	int r, opt, on = 1, remote_port;
+#else
 	int devnull, r, opt, on = 1, remote_port;
+#endif /* WINDOWS */
 	int sock_in = -1, sock_out = -1, rexeced_flag = 0, have_key = 0;
 	const char *remote_ip, *rdomain;
 	char *line, *laddr, *logfile = NULL;
@@ -1645,7 +1648,7 @@ main(int ac, char **av)
 #endif /* WINDOWS */
 
 	platform_pre_session_start();
-
+#ifndef WINDOWS
 	/* Reserve fds we'll need later for reexec things */
 	if ((devnull = open(_PATH_DEVNULL, O_RDWR)) == -1)
 		fatal("open %s: %s", _PATH_DEVNULL, strerror(errno));
@@ -1653,7 +1656,7 @@ main(int ac, char **av)
 		if ((devnull = dup(devnull)) == -1)
 			fatal("dup %s: %s", _PATH_DEVNULL, strerror(errno));
 	}
-
+#endif /* !WINDOWS */
 	seed_rng();
 
 	/* If requested, redirect the logs to the specified logfile. */
@@ -1732,10 +1735,11 @@ main(int ac, char **av)
 		 */
 		(void)atomicio(vwrite, startup_pipe, "\0", 1);
 	}
+#ifndef WINDOWS
 	/* close the fd, but keep the slot reserved */
 	if (dup2(devnull, REEXEC_CONFIG_PASS_FD) == -1)
 		fatal("dup2 devnull->config fd: %s", strerror(errno));
-
+#endif /* !WINDOWS */
 	/* Check that options are sensible */
 	if (options.authorized_keys_command_user == NULL &&
 	    (options.authorized_keys_command != NULL &&
