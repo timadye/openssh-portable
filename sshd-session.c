@@ -542,9 +542,7 @@ privsep_child_cmdline()
 static void
 grace_alarm_handler(int sig)
 {
-#ifdef WINDOWS
-	// TODO: figure out if we need to kill any child processes
-#else /* WINDOWS */
+#ifndef WINDOWS
 	/*
 	 * Try to kill any processes that we have spawned, E.g. authorized
 	 * keys command helpers or privsep children.
