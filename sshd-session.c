@@ -125,7 +125,6 @@
 
 /* Privilege separation related spawn fds */
 #ifdef WINDOWS
-#define PRIVSEP_UNAUTH_MIN_FREE_FD	(PRIVSEP_LOG_FD + 1)
 #define PRIVSEP_AUTH_MIN_FREE_FD	(PRIVSEP_LOG_FD + 1)
 #endif /* WINDOWS */
 
@@ -163,7 +162,6 @@ int auth_sock = -1;
 static int have_agent = 0;
 
 #ifdef WINDOWS
-int privsep_unauth_child = 0;
 int privsep_auth_child = 0;
 int io_sock_in = 0;
 int io_sock_out = 0;
@@ -230,10 +228,14 @@ mm_is_monitor(void)
 }
 
 #ifdef WINDOWS
+/* The following methods are needed to manage sending and receiving
+	information between sshd-session and sshd-auth processes.
+	Where applicable, the methods are copied from sshd.c.
+*/
 static struct sshbuf*
 pack_hostkeys_for_child(void)
 {
-	/* copied from sshd.c */
+	/* copied from pack_hostkeys() in sshd.c, used in send_config_state() */
 	struct sshbuf* m = NULL, * keybuf = NULL, * hostkeys = NULL;
 	int r;
 	u_int i;
@@ -333,64 +335,8 @@ pack_config(struct sshbuf* conf)
 static void
 send_config_state(int fd, struct sshbuf* conf)
 {
-//	/* copied from send_rexec_state in sshd.c */
-//	struct sshbuf* m = NULL, * inc = NULL, * hostkeys = NULL;
-//	struct include_item* item = NULL;
-//	int r, sz;
-//
-//	debug3_f("entering fd = %d config len %zu", fd,
-//		sshbuf_len(conf));
-//
-//	if ((m = sshbuf_new()) == NULL ||
-//		(inc = sshbuf_new()) == NULL)
-//		fatal_f("sshbuf_new failed");
-//
-//	/* pack includes into a string */
-//	TAILQ_FOREACH(item, &includes, entry) {
-//		if ((r = sshbuf_put_cstring(inc, item->selector)) != 0 ||
-//			(r = sshbuf_put_cstring(inc, item->filename)) != 0 ||
-//			(r = sshbuf_put_stringb(inc, item->contents)) != 0)
-//			fatal_fr(r, "compose includes");
-//	}
-//
-//	hostkeys = pack_hostkeys();
-//
-//	/*
-//	 * Protocol from reexec master to child:
-//	 *	string	configuration
-//	 *	uint64	timing_secret
-//	 *	string	host_keys[] {
-//	 *		string private_key
-//	 *		string public_key
-//	 *		string certificate
-//	 *	}
-//	 *	string	included_files[] {
-//	 *		string	selector
-//	 *		string	filename
-//	 *		string	contents
-//	 *	}
-//	 */
-//	if ((r = sshbuf_put_stringb(m, conf)) != 0 ||
-//		(r = sshbuf_put_u64(m, options.timing_secret)) != 0 ||
-//		(r = sshbuf_put_stringb(m, hostkeys)) != 0 ||
-//		(r = sshbuf_put_stringb(m, inc)) != 0)
-//		fatal_fr(r, "compose config");
-//
-//#ifndef WINDOWS
-//	/* We need to fit the entire message inside the socket send buffer */
-//	sz = ROUNDUP(sshbuf_len(m) + 5, 16 * 1024);
-//	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz) == -1)
-//		fatal_f("setsockopt SO_SNDBUF: %s", strerror(errno));
-//#endif /* WINDOWS */
-//	if (ssh_msg_send(fd, 0, m) == -1)
-//		error_f("ssh_msg_send failed");
-//
-//	sshbuf_free(m);
-//	sshbuf_free(inc);
-//	sshbuf_free(hostkeys);
-//
-//	debug3_f("done");
-	/* copied from send_rexec_state in sshd.c */
+	/* copied from send_rexec_state() in sshd.c 
+	   On Windows, uses pack_hostkeys_for_child() and pack_config() */
 	struct sshbuf* keys;
 	u_int mlen;
 #ifdef WINDOWS
@@ -561,61 +507,8 @@ send_hostkeys_state(int fd)
 	sshbuf_free(m);
 }
 
-static void
-recv_hostkeys_state(int fd)
-{
-	struct sshbuf* m;
-	u_char* cp, ver;
-	struct sshkey* key = NULL;
-	const u_char* blob;
-	size_t blen;
-	int r;
-	u_int32_t num_host_key_files;
-
-	debug3("%s: entering fd = %d", __func__, fd);
-
-	if ((m = sshbuf_new()) == NULL)
-		fatal("%s: sshbuf_new failed", __func__);
-	if (ssh_msg_recv(fd, m) == -1)
-		fatal("%s: ssh_msg_recv failed", __func__);
-	if ((r = sshbuf_get_u8(m, &ver)) != 0)
-		fatal("%s: buffer error: %s", __func__, ssh_err(r));
-	if (ver != 0)
-		fatal("%s: rexec version mismatch", __func__);
-
-	if ((r = sshbuf_get_u32(m, &num_host_key_files)) != 0)
-		fatal("%s: buffer error: %s", __func__, ssh_err(r));
-	sensitive_data.host_keys = xcalloc(num_host_key_files, sizeof(struct sshkey*));
-	sensitive_data.host_pubkeys = xcalloc(num_host_key_files, sizeof(struct sshkey*));
-	sensitive_data.host_certificates = xcalloc(num_host_key_files, sizeof(struct sshkey*));
-	for (int i = 0; i < num_host_key_files; i++) {
-		if ((r = sshbuf_get_string_direct(m, &blob, &blen)) != 0)
-			fatal("%s: buffer error: %s", __func__, ssh_err(r));
-		sensitive_data.host_pubkeys[i] = NULL;
-		sensitive_data.host_keys[i] = NULL;
-
-		if (blen) {
-			sshkey_from_blob(blob, blen, &key);
-			sensitive_data.host_pubkeys[i] = key;
-		}
-	}
-
-	for (int i = 0; i < num_host_key_files; i++) {
-		if ((r = sshbuf_get_string_direct(m, &blob, &blen)) != 0)
-			fatal("%s: buffer error: %s", __func__, ssh_err(r));
-		sensitive_data.host_certificates[i] = NULL;
-		if (blen) {
-			sshkey_from_blob(blob, blen, &key);
-			sensitive_data.host_certificates[i] = key;
-		}
-	}
-
-	sshbuf_free(m);
-	debug3("%s: done", __func__);
-}
-
 static char**
-privsep_child_cmdline(int authenticated)
+privsep_child_cmdline()
 {
 	char** argv = saved_argv;
 	int argc = 0;
@@ -635,10 +528,7 @@ privsep_child_cmdline(int authenticated)
 		argc = saved_argc;
 	}
 
-	if (authenticated)
-		argv[argc] = "-z";
-	else
-		argv[argc] = "-y";
+	argv[argc] = "-z";
 
 	return argv;
 }
@@ -792,63 +682,6 @@ privsep_preauth(struct ssh *ssh)
 		authctxt->valid = 1;
 		return 1;
 	}
-	else if (privsep_unauth_child) {
-		close(pmonitor->m_sendfd);
-		close(pmonitor->m_log_recvfd);
-		close(pmonitor->m_recvfd);
-		close(pmonitor->m_log_sendfd);
-
-		pmonitor->m_recvfd = PRIVSEP_MONITOR_FD;
-		pmonitor->m_log_sendfd = PRIVSEP_LOG_FD;
-
-		fcntl(pmonitor->m_recvfd, F_SETFD, FD_CLOEXEC);
-		fcntl(pmonitor->m_log_sendfd, F_SETFD, FD_CLOEXEC);
-
-		/*
-		 * Arrange unpriv-preauth child process fds:
-		 * 0, 1 network socket
-		 * 2 optional stderr
-		 * 3 reserved
-		 * 4 monitor message socket
-		 * 5 monitor logging socket
-		 *
-		 * We know that the monitor sockets will have fds > 4 because
-		 * of the reserved fds in main()
-		 */
-
-		if (ssh_packet_get_connection_in(ssh) != STDIN_FILENO &&
-			dup2(ssh_packet_get_connection_in(ssh), STDIN_FILENO) == -1)
-			fatal("dup2 stdin failed: %s", strerror(errno));
-		if (ssh_packet_get_connection_out(ssh) != STDOUT_FILENO &&
-			dup2(ssh_packet_get_connection_out(ssh),
-				STDOUT_FILENO) == -1)
-			fatal("dup2 stdout failed: %s", strerror(errno));
-		/* leave stderr as-is */
-		log_redirect_stderr_to(NULL); /* dup can clobber log fd */
-		if (pmonitor->m_recvfd != PRIVSEP_MONITOR_FD &&
-			dup2(pmonitor->m_recvfd, PRIVSEP_MONITOR_FD) == -1)
-			fatal("dup2 monitor fd: %s", strerror(errno));
-		if (pmonitor->m_log_sendfd != PRIVSEP_LOG_FD &&
-			dup2(pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) == -1)
-			fatal("dup2 log fd: %s", strerror(errno));
-		closefrom(PRIVSEP_MIN_FREE_FD);
-
-		posix_spawn_file_actions_t actions;
-		posix_spawnattr_t attributes;
-		if (posix_spawn_file_actions_init(&actions) != 0 ||
-			posix_spawn_file_actions_adddup2(&actions, io_sock_in, STDIN_FILENO) != 0 ||
-			posix_spawn_file_actions_adddup2(&actions, io_sock_out, STDOUT_FILENO) != 0 ||
-			posix_spawn_file_actions_adddup2(&actions, pmonitor->m_recvfd, PRIVSEP_MONITOR_FD) != 0 ||
-			posix_spawn_file_actions_adddup2(&actions, pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) != 0)
-			fatal("posix_spawn initialization failed");
-		else {
-			pid_t pid;
-			if (posix_spawn(&pid, options.sshd_auth_path, &actions, &attributes, saved_argv, NULL) != 0)
-				error("%s, posix_spawn failed", __func__);
-			posix_spawn_file_actions_destroy(&actions);
-			posix_spawnattr_destroy(&attributes);
-		}
-	}
 	else { /* parent */
 		posix_spawn_file_actions_t actions;
 
@@ -859,8 +692,6 @@ privsep_preauth(struct ssh *ssh)
 		    posix_spawn_file_actions_adddup2(&actions, pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) != 0 )
 			fatal("posix_spawn initialization failed");
 
-		//char** argv = privsep_child_cmdline(0);
-		// if (__posix_spawn_asuser(&pid, argv[0], &actions, NULL, argv, NULL, SSH_PRIVSEP_USER) != 0)
 		if (__posix_spawn_asuser(&pid, options.sshd_auth_path, &actions, NULL, saved_argv, NULL, SSH_PRIVSEP_USER) != 0)
 			fatal("%s, fork of unprivileged child failed", __func__);
 
@@ -880,8 +711,6 @@ privsep_preauth(struct ssh *ssh)
 
 		close(pmonitor->m_recvfd);
 		close(pmonitor->m_log_sendfd);
-		//send_config_state(pmonitor->m_sendfd, cfg);
-		//send_idexch_state(ssh, pmonitor->m_sendfd);
 		monitor_child_preauth(ssh, pmonitor);
 		while (waitpid(pid, &status, 0) < 0) {
 			if (errno == EINTR)
@@ -1006,13 +835,12 @@ privsep_postauth(struct ssh *ssh, Authctxt *authctxt)
 		    posix_spawn_file_actions_adddup2(&actions, pmonitor->m_recvfd, PRIVSEP_MONITOR_FD) != 0)
 			fatal("posix_spawn initialization failed");
 
-		char** argv = privsep_child_cmdline(1);
+		char** argv = privsep_child_cmdline();
 		if (__posix_spawn_asuser(&pmonitor->m_pid, argv[0], &actions, NULL, argv, NULL, authctxt->pw->pw_name) != 0)
 			fatal("fork of unprivileged child failed");
 		posix_spawn_file_actions_destroy(&actions);
 
 		verbose("User child is on pid %ld", (long)pmonitor->m_pid);
-		//sshbuf_reset(loginmsg);
 		send_config_state(pmonitor->m_sendfd, cfg);
 		send_idexch_state(ssh, pmonitor->m_sendfd);
 		send_autxctx_state(authctxt, pmonitor->m_sendfd);
@@ -1609,10 +1437,6 @@ main(int ac, char **av)
 			    SSH_RELEASE, SSH_OPENSSL_VERSION);
 			exit(0);
 #ifdef WINDOWS
-		case 'y':
-			privsep_unauth_child = 1;
-			logfile = NULL;
-			break;
 		case 'z':
 			privsep_auth_child = 1;
 			logfile = NULL;
@@ -1631,15 +1455,13 @@ main(int ac, char **av)
 	}
 
 #ifdef WINDOWS
-	if (!rexeced_flag && !privsep_unauth_child && !privsep_auth_child)
+	if (!rexeced_flag && !privsep_auth_child)
 #else /* WINDOWS */
 	if (!rexeced_flag)
 #endif /* WINDOWS */
 		fatal("sshd-session should not be executed directly");
 #ifdef WINDOWS
-	if (privsep_unauth_child)
-		closefrom(PRIVSEP_UNAUTH_MIN_FREE_FD);
-	else if (privsep_auth_child)
+	if (privsep_auth_child)
 		closefrom(PRIVSEP_AUTH_MIN_FREE_FD);
 	else
 		closefrom(REEXEC_MIN_FREE_FD);
@@ -1688,7 +1510,7 @@ main(int ac, char **av)
 		fatal("sshbuf_new config buf failed");
 	setproctitle("%s", "[rexeced]");
 #ifdef WINDOWS
-	if (privsep_unauth_child || privsep_auth_child) {
+	if (privsep_auth_child) {
 		recv_rexec_state(PRIVSEP_MONITOR_FD, cfg, &timing_secret); //TODO - should starup_pipe be closed as above ?B
 	}
 	else {
@@ -1722,7 +1544,7 @@ main(int ac, char **av)
 	endpwent();
 
 #ifdef WINDOWS
-	if (!debug_flag && !inetd_flag && !privsep_unauth_child && !privsep_auth_child) {
+	if (!debug_flag && !inetd_flag && !privsep_auth_child) {
 #else /* WINDOWS */
 	if (!debug_flag && !inetd_flag) {
 #endif /* WINDOWS */
@@ -1910,7 +1732,7 @@ main(int ac, char **av)
 
 	rdomain = ssh_packet_rdomain_in(ssh);
 
-	if (privsep_unauth_child || privsep_auth_child) {
+	if (privsep_auth_child) {
 		recv_idexch_state(ssh, PRIVSEP_MONITOR_FD);
 		goto idexch_done;
 	}
