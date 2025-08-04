@@ -604,6 +604,9 @@ main(int ac, char **av)
 	OpenSSL_add_all_algorithms();
 #endif
 
+// Windows logging handled by sending debug messages to the parent sshd process
+// because an unprivileged sshd-auth process cannot open a log file owned by system
+#ifndef WINDOWS
 	/* If requested, redirect the logs to the specified logfile. */
 	if (logfile != NULL) {
 		char *cp, pid_s[32];
@@ -616,6 +619,7 @@ main(int ac, char **av)
 		log_redirect_stderr_to(cp);
 		free(cp);
 	}
+#endif /* !WINDOWS */
 
 	log_init(__progname,
 	    options.log_level == SYSLOG_LEVEL_NOT_SET ?
