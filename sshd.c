@@ -817,7 +817,9 @@ send_rexec_state(int fd)
 
 	sshbuf_free(keys);
 	debug3_f("done");
+#ifndef WINDOWS
 	exit(0);
+#endif /* !WINDOWS */
 }
 
 /*
@@ -1964,6 +1966,7 @@ main(int ac, char **av)
 #else
 	posix_spawn_file_actions_t actions;
 	posix_spawnattr_t attributes;
+	pid_t pid;
 	if (posix_spawn_file_actions_init(&actions) != 0 ||
 		(debug_flag && posix_spawn_file_actions_adddup2(&actions, newsock, STDIN_FILENO) != 0) ||
 		(debug_flag && posix_spawn_file_actions_adddup2(&actions, newsock, STDOUT_FILENO) != 0) ||
@@ -1973,7 +1976,6 @@ main(int ac, char **av)
 		posix_spawnattr_setpgroup(&attributes, 0) != 0)
 		error("posix_spawn initialization failed");
 	else {
-		pid_t pid;
 		if (posix_spawn(&pid, rexec_argv[0], &actions, &attributes, rexec_argv, NULL) != 0)
 			error("%s, posix_spawn failed", __func__);
 		posix_spawn_file_actions_destroy(&actions);
@@ -1983,7 +1985,13 @@ main(int ac, char **av)
 	send_rexec_state(config_s[0]);
 	close(config_s[0]);
 	close(newsock);
-	cleanup_exit(255);
+	// wait for child to exit to propagate exit code to terminal
+	int status;
+	if (waitpid(pid, &status, 0) == -1) {
+		error("waitpid failed");
+		cleanup_exit(255);
+	}
+	cleanup_exit(status);
 #endif /* FORK_NOT_SUPPORTED */
 }
 
