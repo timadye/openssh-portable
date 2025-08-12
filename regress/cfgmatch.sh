@@ -175,6 +175,9 @@ EOD
 		trace "test spec $spec"
 		result=`${SUDO} ${SSHD} -f $OBJ/sshd_config -T -C "$spec" | \
 		    awk '$1=="banner"{print $2}'`
+		if [ "$os" == "windows" ]; then
+			result=${result/$'\r'/} # remove CR (carriage return)
+		fi
 		if [ "$result" != "$expected" ]; then
 			fail "match $config expected $expected got $result"
 		fi
