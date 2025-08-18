@@ -17,6 +17,9 @@
 
 #include <stdarg.h> /* va_list */
 #include "ssherr.h" /* ssh_err() */
+#ifdef WINDOWS
+#include "includes.h" /* typedef unsigned int u_int */
+#endif /* WINDOWS */
 
 /* Supported syslog facilities and levels. */
 typedef enum {
@@ -80,10 +83,6 @@ void	 sshfatal(const char *, const char *, int, int,
     __attribute__((format(printf, 7, 8)));
 void	 sshlogdirect(LogLevel, int, const char *, ...)
     __attribute__((format(printf, 3, 4)));
-
-#ifdef WINDOWS
-typedef unsigned int u_int;
-#endif /* WINDOWS */
 
 struct log_ratelimit_ctx {
 	/* configuration */

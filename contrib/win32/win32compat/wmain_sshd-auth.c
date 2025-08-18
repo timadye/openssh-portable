@@ -45,7 +45,7 @@
 int main(int, char **);
 extern HANDLE main_thread;
 
-int sshd_session_main(int argc, wchar_t **wargv) {
+int sshd_auth_main(int argc, wchar_t **wargv) {
 	char** argv = NULL;
 	int i, r;
 	_set_invalid_parameter_handler(invalid_parameter_handler);
@@ -111,5 +111,5 @@ int wmain(int argc, wchar_t **wargv) {
 			free(path_value);
 	}
 
-	return sshd_session_main(argc, wargv);
+	return sshd_auth_main(argc, wargv);
 }
