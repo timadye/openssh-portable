@@ -15,6 +15,10 @@
 #include <string.h>
 #include "crypto_api.h"
 
+#ifdef WINDOWS
+#include "xmalloc.h"
+#endif /* WINDOWS */
+
 #define int8 crypto_int8
 #define uint8 crypto_uint8
 #define int16 crypto_int16
@@ -296,11 +300,25 @@ static void Decode(uint16 *out,const unsigned char *S,const uint16 *M,long long 
     else
       *out = uint32_mod_uint14(S[0]+(((uint16)S[1])<<8),M[0]);
   }
+#ifdef WINDOWS
+    uint16_t *R2 = NULL, *M2 = NULL, *bottomr = NULL;
+    uint32_t *bottomt = NULL;
+    size_t MR_len = 0, bottom_len = 0;
+#endif /* WINDOWS */
   if (len > 1) {
+#ifdef WINDOWS
+    MR_len = (len + 1) / 2;
+    bottom_len = len / 2;
+    R2 = xcalloc(MR_len, sizeof(*R2));
+    M2 = xcalloc(MR_len, sizeof(*M2));
+    bottomr = xcalloc(bottom_len, sizeof(*bottomr));
+    bottomt = xcalloc(bottom_len, sizeof(*bottomt));
+#else
     uint16 R2[(len+1)/2];
     uint16 M2[(len+1)/2];
     uint16 bottomr[len/2];
     uint32 bottomt[len/2];
+#endif /* WINDOWS */
     long long i;
     for (i = 0;i < len-1;i += 2) {
       uint32 m = M[i]*(uint32) M[i+1];
@@ -336,6 +354,12 @@ static void Decode(uint16 *out,const unsigned char *S,const uint16 *M,long long 
     if (i < len)
       *out++ = R2[i/2];
   }
+#ifdef WINDOWS
+  freezero(R2, MR_len * sizeof(*R2));
+  freezero(M2, MR_len * sizeof(*M2));
+  freezero(bottomr, bottom_len * sizeof(*bottomr));
+  freezero(bottomt, bottom_len * sizeof(*bottomt));
+#endif /* WINDOWS */
 }
 
 /* from supercop-20201130/crypto_kem/sntrup761/ref/Encode.h */
@@ -362,9 +386,19 @@ static void Encode(unsigned char *out,const uint16 *R,const uint16 *M,long long 
       m = (m+255)>>8;
     }
   }
+#ifdef WINDOWS
+  uint16_t *R2 = NULL, *M2 = NULL;
+  size_t MR_len = 0;
+#endif /* WINDOWS */
   if (len > 1) {
+#ifdef WINDOWS
+    MR_len = (len + 1) / 2;
+    R2 = xcalloc(MR_len, sizeof(*R2));
+    M2 = xcalloc(MR_len, sizeof(*M2));
+#else
     uint16 R2[(len+1)/2];
     uint16 M2[(len+1)/2];
+#endif /* WINDOWS */
     long long i;
     for (i = 0;i < len-1;i += 2) {
       uint32 m0 = M[i];
@@ -384,6 +418,10 @@ static void Encode(unsigned char *out,const uint16 *R,const uint16 *M,long long 
     }
     Encode(out,R2,M2,(len+1)/2);
   }
+#ifdef WINDOWS
+  freezero(R2, MR_len * sizeof(*R2));
+  freezero(M2, MR_len * sizeof(*M2));
+#endif /* WINDOWS */
 }
 
 /* from supercop-20201130/crypto_kem/sntrup761/ref/kem.c */
@@ -685,7 +723,12 @@ static void Short_fromlist(small *out,const uint32 *in)
 /* e.g., b = 0 means out = Hash0(in) */
 static void Hash_prefix(unsigned char *out,int b,const unsigned char *in,int inlen)
 {
+#ifdef WINDOWS
+  unsigned char* x;
+  x = xcalloc(inlen + 1, sizeof(*x));
+#else
   unsigned char x[inlen+1];
+#endif /* WINDOWS */
   unsigned char h[64];
   int i;
 
@@ -693,6 +736,9 @@ static void Hash_prefix(unsigned char *out,int b,const unsigned char *in,int inl
   for (i = 0;i < inlen;++i) x[i+1] = in[i];
   crypto_hash_sha512(h,x,inlen+1);
   for (i = 0;i < 32;++i) out[i] = h[i];
+#ifdef WINDOWS
+  freezero(x, (inlen + 1) * sizeof(*x));
+#endif /* WINDOWS */
 }
 
 /* ----- higher-level randomness */
