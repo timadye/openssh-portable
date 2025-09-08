@@ -365,19 +365,12 @@ function Start-OpenSSHPackage
     }
 
     #copy libcrypto dll
-    $libreSSLPath = Join-Path $PSScriptRoot "LibreSSL"
+    $libreSSLPath = Join-Path $PSScriptRoot "vcpkg_installed" 
     if (-not $NoOpenSSL.IsPresent)
     {        
-        if($OneCore)
-        {
-            Copy-Item -Path $(Join-Path $libreSSLPath "bin\onecore\$NativeHostArch\libcrypto.dll") -Destination $packageDir -Force -ErrorAction Stop
-            Copy-Item -Path $(Join-Path $libreSSLPath "bin\onecore\$NativeHostArch\libcrypto.pdb") -Destination $symbolsDir -Force -ErrorAction Stop
-        }
-        else
-        {
-            Copy-Item -Path $(Join-Path $libreSSLPath "bin\desktop\$NativeHostArch\libcrypto.dll") -Destination $packageDir -Force -ErrorAction Stop
-            Copy-Item -Path $(Join-Path $libreSSLPath "bin\desktop\$NativeHostArch\libcrypto.pdb") -Destination $symbolsDir -Force -ErrorAction Stop
-        }
+        $subPath = $NativeHostArch + "-custom\" + $NativeHostArch + "-custom\bin\"
+        Copy-Item -Path $(Join-Path $libreSSLPath "$subPath\libcrypto.dll") -Destination $packageDir -Force -ErrorAction Stop
+        Copy-Item -Path $(Join-Path $libreSSLPath "$subPath\libcrypto.pdb") -Destination $symbolsDir -Force -ErrorAction Stop
     }    
 
     if ($DestinationPath -ne "") {
@@ -553,12 +546,6 @@ function Start-OpenSSHBuild
         $xml.Project.PropertyGroup.WindowsSDKVersion = $win10SDKVer
         $xml.Project.PropertyGroup.AdditionalDependentLibs = 'onecore.lib;shlwapi.lib'
         $xml.Project.PropertyGroup.MinimalCoreWin = 'true'
-        
-        #Use onecore libcrypto binaries
-        $xml.Project.PropertyGroup."LibreSSL-x86-Path" = '$(SolutionDir)\LibreSSL\bin\onecore\x86\'
-        $xml.Project.PropertyGroup."LibreSSL-x64-Path" = '$(SolutionDir)\LibreSSL\bin\onecore\x64\'
-        $xml.Project.PropertyGroup."LibreSSL-arm-Path" = '$(SolutionDir)\LibreSSL\bin\onecore\arm\'
-        $xml.Project.PropertyGroup."LibreSSL-arm64-Path" = '$(SolutionDir)\LibreSSL\bin\onecore\arm64\'
         
         $xml.Save($PathTargets)
     }
