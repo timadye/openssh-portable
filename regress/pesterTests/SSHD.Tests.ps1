@@ -45,8 +45,8 @@ Describe "E2E scenarios for sshd" -Tags "CI" {
             $sshProc = Start-Process -FilePath ssh -ArgumentList "-l $user test_target" -PassThru
             Start-Sleep -Seconds 2
             $sshdPidsCountWithConn = (Get-Process -Name sshd* | Select-Object -ExpandProperty Id).Count
-            # Wait for LoginGraceTime to expire
-            Start-Sleep -Seconds 10
+            # Wait for LoginGraceTime to expire, accounting for jitter
+            Start-Sleep -Seconds 14
             $sshdPidsCountAfter = (Get-Process -Name sshd* | Select-Object -ExpandProperty Id).Count
 
             if ($sshProc -and !$sshProc.HasExited) {
