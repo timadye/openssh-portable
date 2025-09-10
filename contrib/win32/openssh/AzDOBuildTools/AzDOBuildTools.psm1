@@ -218,31 +218,9 @@ function Invoke-OpenSSHTests
     # Run all E2E tests.
     Write-Verbose -Verbose -Message "Running E2E Tests..."
     Set-OpenSSHTestEnvironment -Confirm:$false
-    Invoke-OpenSSHE2ETest
-    if (($OpenSSHTestInfo -eq $null) -or (-not (Test-Path $OpenSSHTestInfo["E2ETestResultsFile"])))
-    {
-        Write-BuildMessage -Message "Test result file $OpenSSHTestInfo["E2ETestResultsFile"] not found after tests." -Category Error
-        $AllTestsPassed =  $false
-    }
-    else
-    {
-        $xml = [xml](Get-Content $OpenSSHTestInfo["E2ETestResultsFile"] | out-string)
-        if ([int]$xml.'test-results'.failures -gt 0)
-        {
-            $errorMessage = "$($xml.'test-results'.failures) E2E tests in regress\pesterTests failed. Detail test log is at $($OpenSSHTestInfo["E2ETestResultsFile"])."
-            Write-BuildMessage -Message $errorMessage -Category Error
-            $AllTestsPassed = $false
-        }
-        else
-        {
-            Write-BuildMessage -Message "All E2E tests passed!" -Category Information
-        }
-    }
-
-    # Bash tests.
-    Write-Verbose -Verbose -Message "Running Bash Tests..."
 
     # Ensure CygWin is installed, and install from Chocolatey if needed.
+    # used for bash tests and default shell pester tests
     $cygwinInstalled = $true
     $cygwinInstallLocation = "$env:SystemDrive/cygwin"
     if (! (Test-Path -Path "$cygwinInstallLocation/bin/sh.exe"))
@@ -269,9 +247,33 @@ function Invoke-OpenSSHTests
         }
     }
 
-    # Run UNIX bash tests.
     if ($cygwinInstalled)
     {
+        Invoke-OpenSSHE2ETest
+        if (($OpenSSHTestInfo -eq $null) -or (-not (Test-Path $OpenSSHTestInfo["E2ETestResultsFile"])))
+        {
+            Write-BuildMessage -Message "Test result file $OpenSSHTestInfo["E2ETestResultsFile"] not found after tests." -Category Error
+            $AllTestsPassed =  $false
+        }
+        else
+        {
+            $xml = [xml](Get-Content $OpenSSHTestInfo["E2ETestResultsFile"] | out-string)
+            if ([int]$xml.'test-results'.failures -gt 0)
+            {
+                $errorMessage = "$($xml.'test-results'.failures) E2E tests in regress\pesterTests failed. Detail test log is at $($OpenSSHTestInfo["E2ETestResultsFile"])."
+                Write-BuildMessage -Message $errorMessage -Category Error
+                $AllTestsPassed = $false
+            }
+            else
+            {
+                Write-BuildMessage -Message "All E2E tests passed!" -Category Information
+            }
+        }
+
+        # Bash tests.
+        Write-Verbose -Verbose -Message "Running Bash Tests..."
+
+        # Run UNIX bash tests.
         Write-Verbose -Verbose -Message "Starting Bash Tests..."
         Invoke-OpenSSHBashTests
         if (-not $Global:bash_tests_summary)
