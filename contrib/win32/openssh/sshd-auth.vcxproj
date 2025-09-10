@@ -103,6 +103,14 @@
     <CharacterSet>MultiByte</CharacterSet>
     <SpectreMitigation>Spectre</SpectreMitigation>
   </PropertyGroup>
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgTriplet Condition="'$(Platform)' == 'Win32'">x86-custom</VcpkgTriplet>
+    <VcpkgTriplet Condition="'$(Platform)' == 'x64'">x64-custom</VcpkgTriplet>
+    <VcpkgTriplet Condition="'$(Platform)' == 'ARM'">arm-custom</VcpkgTriplet>
+    <VcpkgTriplet Condition="'$(Platform)' == 'ARM64'">arm64-custom</VcpkgTriplet>
+    <VcpkgAdditionalInstallOptions>--overlay-triplets=$(SolutionDir)vcpkg_triplets --overlay-ports=$(SolutionDir)vcpkg_overlay_ports</VcpkgAdditionalInstallOptions>
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+  </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
@@ -199,7 +207,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>posix_compat.lib;libssh.lib;openbsd_compat.lib;zlib.lib;$(SSLLib)$(AdditionalDependentLibs);%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(LibreSSL-x86-Path);$(ZLib-x86-Path);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(SolutionDir)\vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
       <EntryPointSymbol>wmainCRTStartup</EntryPointSymbol>
       <ShowProgress>NotSet</ShowProgress>
@@ -227,7 +235,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>posix_compat.lib;libssh.lib;openbsd_compat.lib;zlib.lib;$(SSLLib)$(AdditionalDependentLibs);%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(LibreSSL-x64-Path);$(ZLib-x64-Path);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(SolutionDir)\vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
       <EntryPointSymbol>wmainCRTStartup</EntryPointSymbol>
       <ShowProgress>NotSet</ShowProgress>
@@ -255,7 +263,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>posix_compat.lib;libssh.lib;openbsd_compat.lib;zlib.lib;$(SSLLib)$(AdditionalDependentLibs);%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(LibreSSL-arm64-Path);$(ZLib-arm64-Path);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(SolutionDir)\vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
       <EntryPointSymbol>wmainCRTStartup</EntryPointSymbol>
       <ShowProgress>NotSet</ShowProgress>
@@ -283,7 +291,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>posix_compat.lib;libssh.lib;openbsd_compat.lib;zlib.lib;$(SSLLib)$(AdditionalDependentLibs);%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(LibreSSL-arm-Path);$(ZLib-arm-Path);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(SolutionDir)\vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
       <EntryPointSymbol>wmainCRTStartup</EntryPointSymbol>
       <ShowProgress>NotSet</ShowProgress>
@@ -314,7 +322,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalDependencies>posix_compat.lib;libssh.lib;openbsd_compat.lib;zlib.lib;$(SSLLib)$(AdditionalDependentLibs);%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(LibreSSL-x86-Path);$(ZLib-x86-Path);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(SolutionDir)\vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
       <EntryPointSymbol>wmainCRTStartup</EntryPointSymbol>
       <FullProgramDatabaseFile>true</FullProgramDatabaseFile>
@@ -347,7 +355,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalDependencies>posix_compat.lib;libssh.lib;openbsd_compat.lib;zlib.lib;$(SSLLib)$(AdditionalDependentLibs);%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(LibreSSL-x64-Path);$(ZLib-x64-Path);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(SolutionDir)\vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
       <EntryPointSymbol>wmainCRTStartup</EntryPointSymbol>
       <FullProgramDatabaseFile>true</FullProgramDatabaseFile>
@@ -380,7 +388,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalDependencies>posix_compat.lib;libssh.lib;openbsd_compat.lib;zlib.lib;$(SSLLib)$(AdditionalDependentLibs);%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(LibreSSL-arm64-Path);$(ZLib-arm64-Path);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(SolutionDir)\vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
       <EntryPointSymbol>wmainCRTStartup</EntryPointSymbol>
       <FullProgramDatabaseFile>true</FullProgramDatabaseFile>
@@ -413,7 +421,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalDependencies>posix_compat.lib;libssh.lib;openbsd_compat.lib;zlib.lib;$(SSLLib)$(AdditionalDependentLibs);%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(LibreSSL-arm-Path);$(ZLib-arm-Path);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(OpenSSH-Lib-Path)$(Platform)\$(Configuration);$(SolutionDir)\vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
       <EntryPointSymbol>wmainCRTStartup</EntryPointSymbol>
       <FullProgramDatabaseFile>true</FullProgramDatabaseFile>
