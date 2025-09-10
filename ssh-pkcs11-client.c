@@ -593,15 +593,31 @@ ecdsa_do_finish(EC_KEY *ec)
 #ifdef WINDOWS
 
 static void
-wrap_key(struct sshkey *k)
+wrap_key(struct sshkey* k)
 {
-	if (k->type == KEY_RSA)
-		RSA_set_method(k->pkey, helper_rsa);
+	RSA* rsa = NULL;
+	EC_KEY* ecdsa = NULL;
+
+	if (k->type == KEY_RSA) {
+		if ((rsa = EVP_PKEY_get1_RSA(k->pkey)) == NULL)
+			fatal_f("no RSA key");
+		if (RSA_set_method(rsa, helper_rsa) != 1)
+			fatal_f("RSA_set_method failed");
+		if (EVP_PKEY_set1_RSA(k->pkey, rsa) != 1)
+			fatal_f("EVP_PKEY_set1_RSA failed");
+		RSA_free(rsa);
 #if defined(OPENSSL_HAS_ECC) && defined(HAVE_EC_KEY_METHOD_NEW)
-	else if (k->type == KEY_ECDSA)
-		EC_KEY_set_method(k->pkey, helper_ecdsa);
+	}
+	else if (k->type == KEY_ECDSA) {
+		if ((ecdsa = EVP_PKEY_get1_EC_KEY(k->pkey)) == NULL)
+			fatal_f("no ECDSA key");
+		if (EC_KEY_set_method(ecdsa, helper_ecdsa) != 1)
+			fatal_f("EC_KEY_set_method failed");
+		if (EVP_PKEY_set1_EC_KEY(k->pkey, ecdsa) != 1)
+			fatal_f("EVP_PKEY_set1_EC_KEY failed");
+		EC_KEY_free(ecdsa);
 #endif /* OPENSSL_HAS_ECC && HAVE_EC_KEY_METHOD_NEW */
-	else
+	} else
 		fatal_f("unknown key type");
 }
 

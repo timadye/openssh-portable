@@ -45,7 +45,7 @@ sigalrm_APC(_In_opt_ LPVOID lpArgToCompletionRoutine,
 }
 
 unsigned int
-w32_alarm(unsigned int sec)
+w32_alarm(long long sec)
 {
 	LARGE_INTEGER due;
 	ULONGLONG sec_passed;
