@@ -77,22 +77,6 @@ Describe "E2E scenarios for ssh client" -Tags "CI" {
         $dfltShellCmdOptionRegKeyName = "DefaultShellCommandOption"
         Remove-ItemProperty -Path $dfltShellRegPath -Name $dfltShellRegKeyName -ErrorAction SilentlyContinue
         Remove-ItemProperty -Path $dfltShellRegPath -Name $dfltShellCmdOptionRegKeyName -ErrorAction SilentlyContinue
-
-        function ConfigureDefaultShell {
-            param
-            (
-                  [string] $default_shell_path,
-                  [string] $default_shell_cmd_option_val = $null
-            )
-
-            if (!(Test-Path $dfltShellRegPath)) {
-                New-Item -Path $dfltShellRegPath -Force | Out-Null
-            }
-            New-ItemProperty -Path $dfltShellRegPath -Name $dfltShellRegKeyName -Value $default_shell_path -PropertyType String -Force
-            if ($default_shell_cmd_option_val -ne $null) {
-                New-ItemProperty -Path $dfltShellRegPath -Name $dfltShellCmdOptionRegKeyName -Value $default_shell_cmd_option_val -PropertyType String -Force
-            }
-        }
     }
 
     BeforeEach {
@@ -411,6 +395,12 @@ Describe "E2E scenarios for ssh client" -Tags "CI" {
         It "$tC.$tI - ProxyCommand with absolute path to the file" {
             iex "cmd /c `"ssh -o ProxyCommand=`"`"$($env:ComSpec) /c echo test string for invalid proxy 1>&2`"`" abc 2>$stderrFile`""
             $stderrFile | Should Contain "test string for invalid proxy"
+        }
+
+        It "$tC.$tI - disable pseudo-terminal allocation (-T)" {
+            $o = ssh -T test_target echo 1234
+            $LASTEXITCODE | Should Be 0
+            $o | Should Be "1234"
         }
     }
 }
