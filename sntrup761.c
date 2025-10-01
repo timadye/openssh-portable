@@ -16,6 +16,10 @@
 #include <string.h>
 #include "crypto_api.h"
 
+#ifdef WINDOWS
+#include "xmalloc.h"
+#endif /* WINDOWS */
+
 #define crypto_declassify(x, y) do {} while (0)
 
 #define int8 crypto_int8
@@ -1753,8 +1757,18 @@ static void Encode(unsigned char *out, const uint16_t *R, const uint16_t *M, lon
       m = (m + 255) >> 8;
     }
   }
+#ifdef WINDOWS
+  uint16_t *R2 = NULL, *M2 = NULL;
+  size_t MR_len = 0;
+#endif /* WINDOWS */
   if (len > 1) {
+#ifdef WINDOWS
+    MR_len = (len + 1) / 2;
+    R2 = xcalloc(MR_len, sizeof(*R2));
+    M2 = xcalloc(MR_len, sizeof(*M2));
+#else
     uint16_t R2[(len + 1) / 2], M2[(len + 1) / 2];
+#endif /* WINDOWS */
     long long i;
     for (i = 0; i < len - 1; i += 2) {
       uint32_t m0 = M[i];
@@ -1774,6 +1788,10 @@ static void Encode(unsigned char *out, const uint16_t *R, const uint16_t *M, lon
     }
     Encode(out, R2, M2, (len + 1) / 2);
   }
+#ifdef WINDOWS
+  freezero(R2, MR_len * sizeof(*R2));
+  freezero(M2, MR_len * sizeof(*M2));
+#endif /* WINDOWS */
 }
 
 static void Decode(uint16_t *out, const unsigned char *S, const uint16_t *M, long long len) {
@@ -1785,9 +1803,23 @@ static void Decode(uint16_t *out, const unsigned char *S, const uint16_t *M, lon
     else
       *out = uint32_mod_uint14(S[0] + (((uint16_t)S[1]) << 8), M[0]);
   }
+#ifdef WINDOWS
+    uint16_t *R2 = NULL, *M2 = NULL, *bottomr = NULL;
+    uint32_t *bottomt = NULL;
+    size_t MR_len = 0, bottom_len = 0;
+#endif /* WINDOWS */
   if (len > 1) {
+#ifdef WINDOWS
+    MR_len = (len + 1) / 2;
+    bottom_len = len / 2;
+    R2 = xcalloc(MR_len, sizeof(*R2));
+    M2 = xcalloc(MR_len, sizeof(*M2));
+    bottomr = xcalloc(bottom_len, sizeof(*bottomr));
+    bottomt = xcalloc(bottom_len, sizeof(*bottomt));
+#else
     uint16_t R2[(len + 1) / 2], M2[(len + 1) / 2], bottomr[len / 2];
     uint32_t bottomt[len / 2];
+#endif /* WINDOWS */
     long long i;
     for (i = 0; i < len - 1; i += 2) {
       uint32_t m = M[i] * (uint32_t)M[i + 1];
@@ -1820,6 +1852,12 @@ static void Decode(uint16_t *out, const unsigned char *S, const uint16_t *M, lon
     }
     if (i < len) *out++ = R2[i / 2];
   }
+#ifdef WINDOWS
+  freezero(R2, MR_len * sizeof(*R2));
+  freezero(M2, MR_len * sizeof(*M2));
+  freezero(bottomr, bottom_len * sizeof(*bottomr));
+  freezero(bottomt, bottom_len * sizeof(*bottomt));
+#endif /* WINDOWS */
 }
 
 static void R3_fromRq(small *out, const Fq *r) {
@@ -1952,13 +1990,27 @@ static void Short_fromlist(small *out, const uint32_t *in) {
   for (i = 0; i < p; ++i) out[i] = (L[i] & 3) - 1;
 }
 
+/* ----- underlying hash function */
+
+#define Hash_bytes 32
+
+/* e.g., b = 0 means out = Hash0(in) */
 static void Hash_prefix(unsigned char *out, int b, const unsigned char *in, int inlen) {
+#ifdef WINDOWS
+  unsigned char* x;
+  x = xcalloc(inlen + 1, sizeof(*x));
+  unsigned char h[64];
+#else
   unsigned char x[inlen + 1], h[64];
+#endif /* WINDOWS */
   int i;
   x[0] = b;
   for (i = 0; i < inlen; ++i) x[i + 1] = in[i];
   crypto_hash_sha512(h, x, inlen + 1);
   for (i = 0; i < 32; ++i) out[i] = h[i];
+#ifdef WINDOWS
+  freezero(x, (inlen + 1) * sizeof(*x));
+#endif /* WINDOWS */
 }
 
 static uint32_t urandom32(void) {

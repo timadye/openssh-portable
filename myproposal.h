@@ -24,16 +24,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifdef WINDOWS
- // these should be in the same order as upstream, without the ones we don't support
-#define KEX_SERVER_KEX	\
-	"mlkem768x25519-sha256," \
-	"curve25519-sha256," \
-	"curve25519-sha256@libssh.org," \
-	"ecdh-sha2-nistp256," \
-	"ecdh-sha2-nistp384," \
-	"ecdh-sha2-nistp521,"
-#else
 #define KEX_SERVER_KEX	\
 	"mlkem768x25519-sha256," \
 	"sntrup761x25519-sha512," \
@@ -43,7 +33,6 @@
 	"ecdh-sha2-nistp256," \
 	"ecdh-sha2-nistp384," \
 	"ecdh-sha2-nistp521"
-#endif
 
 #define KEX_CLIENT_KEX KEX_SERVER_KEX "," \
 	"diffie-hellman-group-exchange-sha256," \
