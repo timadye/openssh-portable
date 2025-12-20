@@ -26,6 +26,9 @@ struct ssh_identitylist {
 	char **comments;
 };
 
+struct ssh_store_buffer {
+};
+
 /* Key destination restrictions */
 struct dest_constraint_hop {
 	char *user;	/* wildcards allowed */
@@ -103,6 +106,19 @@ int	ssh_agent_bind_hostkey(int sock, const struct sshkey *key,
 /* generic extension mechanism */
 #define SSH_AGENTC_EXTENSION			27
 
+/* ssh-store commands */
+#define SSH_AGENTC_SET_VARIABLE			40
+#define SSH_AGENT_VARIABLE_REPLACED		41
+#define SSH_AGENTC_GET_VARIABLE			42
+#define SSH_AGENT_GET_VARIABLE_ANSWER		43
+#define SSH_AGENT_NO_VARIABLE			44
+#define SSH_AGENTC_LIST_VARIABLE_NAMES		45
+#define SSH_AGENT_VARIABLE_NAMES_ANSWER		46
+#define SSH_AGENTC_LIST_VARIABLES		47
+#define SSH_AGENT_VARIABLES_ANSWER		48
+#define SSH_AGENTC_REMOVE_VARIABLE		49
+#define SSH_AGENTC_REMOVE_ALL_VARIABLES		50
+
 #define	SSH_AGENT_CONSTRAIN_LIFETIME		1
 #define	SSH_AGENT_CONSTRAIN_CONFIRM		2
 #define	SSH_AGENT_CONSTRAIN_MAXSIGN		3
@@ -117,5 +133,17 @@ int	ssh_agent_bind_hostkey(int sock, const struct sshkey *key,
 #define	SSH_AGENT_OLD_SIGNATURE			0x01
 #define	SSH_AGENT_RSA_SHA2_256			0x02
 #define	SSH_AGENT_RSA_SHA2_512			0x04
+
+typedef struct sshbuf Buffer;
+int
+ssh_set_variable(int, const char *, u_int, const char *, u_int);
+int
+ssh_get_variable(int, const char *, u_int, char **, u_int *);
+int
+ssh_get_first_variable(int, const char *, u_int, char, char **, u_int *, char **, u_int *, Buffer *, int *);
+int
+ssh_get_next_variable(int, char, char **, u_int *, char **, u_int *, Buffer *, int *);
+int
+ssh_delete_variable(int, const char *, u_int, char);
 
 #endif				/* AUTHFD_H */
