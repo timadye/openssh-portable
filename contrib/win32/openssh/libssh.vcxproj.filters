@@ -82,6 +82,8 @@
     <ClCompile Include="$(OpenSSH-Src-Path)ssh-ed25519-sk.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)ssh-sk.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)sshbuf-io.c" />
+    <ClCompile Include="$(OpenSSH-Src-Path)buffer.c" />
+    <ClCompile Include="$(OpenSSH-Src-Path)bufaux.c" />
     <ClCompile Include="..\win32compat\spawn-ext.c" />
     <ClCompile Include="..\..\..\cipher-chachapoly-libcrypto.c" />
   </ItemGroup>
