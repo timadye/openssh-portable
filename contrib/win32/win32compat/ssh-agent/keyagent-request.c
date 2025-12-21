@@ -38,6 +38,8 @@
 #include "ssh-pkcs11.h"
 #endif
 #include "xmalloc.h"
+#include "buffer.h"
+#include "openbsd-compat/sys-queue.h"
 
 #pragma warning(push, 3)
 
@@ -47,6 +49,21 @@
 
 extern char* allowed_providers;
 extern int remote_add_provider;
+
+typedef struct variable {
+	TAILQ_ENTRY(variable) next;
+	char *var;
+	char *val;
+	u_int lvar;
+	u_int lval;
+} Variable;
+
+typedef struct {
+	int nentries;
+	TAILQ_HEAD(varqueue, variable) varlist;
+} Vartab;
+
+Vartab vartable;
 
 /* 
  * get registry root where keys are stored 
@@ -1081,5 +1098,190 @@ int process_keyagent_request(struct sshbuf* request, struct sshbuf* response, st
 	}
 }
 #endif
+
+void
+vartab_init(void)
+{
+	TAILQ_INIT(&vartable.varlist);
+	vartable.nentries = 0;
+}
+
+static void
+free_variable(Variable *v)
+{
+	free(v->var);
+	free(v->val);
+	free(v);
+}
+
+/* return variable entry for given name */
+static Variable *
+lookup_variable(const char *var, u_int lvar)
+{
+	Variable *v;
+
+	TAILQ_FOREACH(v, &vartable.varlist, next) {
+		if (lvar == v->lvar && 0 == memcmp(var, v->var, lvar))
+			return (v);
+	}
+	return (NULL);
+}
+
+
+int
+process_set_variable(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
+{
+	u_int lvar, lval;
+	char *var, *val;
+	Variable *v;
+	int replace = 0;
+
+	var= buffer_get_string(request, &lvar);
+	val= buffer_get_string(request, &lval);
+
+	if ((v = lookup_variable(var, lvar))) {
+		debug("set '%.*s' = '%.*s' (replacing old value '%.*s')", lvar, var, lval, val, v->lval, v->val);
+		free(var);
+		free(v->val);
+		replace = 1;
+	} else {
+		debug("set '%.*s' = '%.*s'", lvar, var, lval, val);
+		v = xmalloc(sizeof(Variable));
+		v->var = var;
+		v->lvar = lvar;
+		TAILQ_INSERT_TAIL(&vartable.varlist, v, next);
+		vartable.nentries++;
+	}
+	v->val = val;
+	v->lval = lval;
+	buffer_put_int(response, 1);
+	buffer_put_char(response, replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS);
+	return 0;
+}
+
+
+int
+process_get_variable(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
+{
+	u_int lvar;
+	char *var;
+	Variable *v;
+	Buffer msg;
+
+	var= buffer_get_string(request, &lvar);
+
+	buffer_init(&msg);
+	if ((v = lookup_variable(var, lvar))) {
+		debug("get '%.*s' -> '%.*s'", lvar, var, v->lval, v->val);
+		buffer_put_char(&msg, SSH_AGENT_GET_VARIABLE_ANSWER);
+		buffer_put_string(&msg, v->val, v->lval);
+	} else {
+		debug("variable '%.*s' not found", lvar, var);
+		buffer_put_char(&msg, SSH_AGENT_NO_VARIABLE);
+	}
+	free(var);
+	buffer_put_int(response, buffer_len(&msg));
+	buffer_append(response, buffer_ptr(&msg), buffer_len(&msg));
+	buffer_free(&msg);
+	return 0;
+}
+
+/* send list of variables */
+int
+process_list_variables(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con, char full)
+{
+	Buffer msg, msg2;
+	char *prefix;
+	u_int lprefix, nret = 0;
+	Variable *v;
+
+	prefix= buffer_get_string(request, &lprefix);
+	buffer_init(&msg);
+	TAILQ_FOREACH(v, &vartable.varlist, next) {
+		if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
+			buffer_put_string(&msg, v->var, v->lvar);
+			if (full) buffer_put_string(&msg, v->val, v->lval);
+			nret++;
+		}
+	}
+	free(prefix);
+	buffer_init(&msg2);
+	buffer_put_char(&msg2, full ?
+			SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
+	buffer_put_int(&msg2, nret);
+	buffer_put_int(response, buffer_len(&msg)+buffer_len(&msg2));
+	buffer_append(response, buffer_ptr(&msg2), buffer_len(&msg2));
+	buffer_append(response, buffer_ptr(&msg), buffer_len(&msg));
+	buffer_free(&msg);
+	return 0;
+}
+
+/* shared */
+int
+process_remove_variable(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
+{
+	int success = 0;
+	u_int lvar;
+	char *var;
+	Variable *v;
+
+	var= buffer_get_string(request, &lvar);
+
+	if ((v = lookup_variable(var, lvar))) {
+		/*
+		 * We have this key.  Free the old key.  Since we
+		 * don't want to leave empty slots in the middle of
+		 * the array, we actually free the key there and move
+		 * all the entries between the empty slot and the end
+		 * of the array.
+		 */
+		if (vartable.nentries < 1)
+			fatal("process_remove_identity: "
+						"internal error: vartable.nentries %d",
+						vartable.nentries);
+		TAILQ_REMOVE(&vartable.varlist, v, next);
+		free_variable (v);
+		vartable.nentries--;
+		success = 1;
+	}
+	free (var);
+	buffer_put_int(response, 1);
+	buffer_put_char(response,
+			success ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
+	return 0;
+}
+
+int
+process_remove_all_variables(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
+{
+	char *prefix;
+	u_int lprefix, ndel = 0;
+	Variable *v, *last = NULL;
+
+	prefix= buffer_get_string(request, &lprefix);
+	TAILQ_FOREACH(v, &vartable.varlist, next) {
+		if (last) {   /* don't remove variable until we've moved past it */
+			TAILQ_REMOVE(&vartable.varlist, last, next);
+			free_variable (last);
+			last = NULL;
+		}
+		if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
+			vartable.nentries--;
+			ndel++;
+			last = v;
+		}
+	}
+	if (last) {
+		TAILQ_REMOVE(&vartable.varlist, last, next);
+		free_variable (last);
+	}
+	free(prefix);
+
+	/* Send success. */
+	buffer_put_int(response, 1);
+	buffer_put_char(response, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
+	return 0;
+}
+
 
 #pragma warning(pop)
