@@ -26,9 +26,6 @@ struct ssh_identitylist {
 	char **comments;
 };
 
-struct ssh_store_buffer {
-};
-
 /* Key destination restrictions */
 struct dest_constraint_hop {
 	char *user;	/* wildcards allowed */
