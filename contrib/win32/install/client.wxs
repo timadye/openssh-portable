@@ -13,6 +13,9 @@
                 <File Name="ssh-add.exe" KeyPath="yes" />
             </Component>
             <Component>
+                <File Name="ssh-store.exe" KeyPath="yes" />
+            </Component>
+            <Component>
                 <File Name="ssh-keyscan.exe" KeyPath="yes" />
             </Component>
             <Component>
