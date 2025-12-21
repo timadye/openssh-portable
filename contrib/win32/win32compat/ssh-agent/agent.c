@@ -158,9 +158,8 @@ agent_listen_loop()
 			GetNamedPipeClientProcessId(con, &client_pid);
 			verbose("client pid %d connected", client_pid);
 			if (debug_mode) {
+				/*debug mode: process each request one at a time */
 				agent_process_connection(con);
-				agent_cleanup();
-				return;
 			} else {
 				/* spawn a child to take care of this*/
 				wchar_t path[PATH_MAX], module_path[PATH_MAX];
