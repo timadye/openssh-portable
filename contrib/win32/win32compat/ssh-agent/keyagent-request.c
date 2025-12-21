@@ -1182,9 +1182,12 @@ process_list_variables(struct sshbuf* request, struct sshbuf* response, struct a
 	Variable *v;
 
 	prefix= buffer_get_string(request, &lprefix);
+	debug("list '%.*s'", lprefix, prefix);
 	buffer_init(&msg);
 	TAILQ_FOREACH(v, &vartable.varlist, next) {
 		if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
+			if (full) debug("  -> '%.*s' = '%.*s'", v->lvar, v->var, v->lval, v->val);
+			else      debug("  -> '%.*s'",          v->lvar, v->var);
 			buffer_put_string(&msg, v->var, v->lvar);
 			if (full) buffer_put_string(&msg, v->val, v->lval);
 			nret++;
