@@ -196,5 +196,6 @@ AnalyzeProject sftp
 AnalyzeProject sftp-server
 AnalyzeProject ssh
 AnalyzeProject ssh-add
+AnalyzeProject ssh-store
 AnalyzeProject ssh-agent
 AnalyzeProject sshd
