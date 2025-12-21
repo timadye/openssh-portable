@@ -170,6 +170,24 @@ process_request(struct agent_connection* con)
 	case SSH_AGENTC_EXTENSION:
 		r = process_extension(request, response, con);
 		break;
+	case SSH_AGENTC_SET_VARIABLE:
+		r = process_set_variable(request, response, con);
+		break;
+	case SSH_AGENTC_GET_VARIABLE:
+		r = process_get_variable(request, response, con);
+		break;
+	case SSH_AGENTC_LIST_VARIABLE_NAMES:
+		r = process_list_variables(request, response, con, 0);
+		break;
+	case SSH_AGENTC_LIST_VARIABLES:
+		r = process_list_variables(request, response, con, 1);
+		break;
+	case SSH_AGENTC_REMOVE_VARIABLE:
+		r = process_remove_variable(request, response, con);
+		break;
+	case SSH_AGENTC_REMOVE_ALL_VARIABLES:
+		r = process_remove_all_variables(request, response, con);
+		break;
 	default:
 		debug("unknown agent request %d", type);
 		r = -1;

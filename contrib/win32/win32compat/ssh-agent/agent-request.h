@@ -22,4 +22,12 @@ int process_add_smartcard_key(struct sshbuf*, struct sshbuf*, struct agent_conne
 int process_remove_smartcard_key(struct sshbuf*, struct sshbuf*, struct agent_connection*);
 int process_extension(struct sshbuf*, struct sshbuf*, struct agent_connection*);
 
+void vartab_init(void);
+int process_remove_all(struct sshbuf*, struct sshbuf*, struct agent_connection*);
+int process_set_variable(struct sshbuf*, struct sshbuf*, struct agent_connection*);
+int process_get_variable(struct sshbuf*, struct sshbuf*, struct agent_connection*);
+int process_list_variables(struct sshbuf*, struct sshbuf*, struct agent_connection*, char full);
+int process_remove_variable(struct sshbuf*, struct sshbuf*, struct agent_connection*);
+int process_remove_all_variables(struct sshbuf*, struct sshbuf*, struct agent_connection*);
+
 /* auth */
