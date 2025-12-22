@@ -1131,30 +1131,51 @@ lookup_variable(const char *var, u_int lvar)
 int
 process_set_variable(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
 {
-	u_int lvar, lval;
-	char *var, *val;
-	Variable *v;
-	int replace = 0;
+	u_int lvar = 0, lval = 0;
+	DWORD loldval = 0, oldtype = 0;
+	char *var = 0, *val = 0, *oldval = 0;
+	LPSTR svar = 0;
+	int replace = 0, success = 0, stage = 0;
+	HKEY reg = 0, user_root = 0;
+	SECURITY_ATTRIBUTES sa;
 
 	var= buffer_get_string(request, &lvar);
 	val= buffer_get_string(request, &lval);
+	svar = malloc(lvar + 1);
+	if (var && val && svar) {
+		memcpy(svar, var, lvar);
+		svar[lvar] = '\0';
 
-	if ((v = lookup_variable(var, lvar))) {
-		debug("set '%.*s' = '%.*s' (replacing old value '%.*s')", lvar, var, lval, val, v->lval, v->val);
-		free(var);
-		free(v->val);
-		replace = 1;
-	} else {
-		debug("set '%.*s' = '%.*s'", lvar, var, lval, val);
-		v = xmalloc(sizeof(Variable));
-		v->var = var;
-		v->lvar = lvar;
-		TAILQ_INSERT_TAIL(&vartable.varlist, v, next);
-		vartable.nentries++;
+		memset(&sa, 0, sizeof(SECURITY_ATTRIBUTES));
+		sa.nLength = sizeof(sa);
+		if ((stage++, ConvertStringSecurityDescriptorToSecurityDescriptorW(REG_KEY_SDDL, SDDL_REVISION_1, &sa.lpSecurityDescriptor, &sa.nLength)) &&
+				(stage++, get_user_root(con, &user_root) == 0) &&
+				(stage++, RegCreateKeyExW(user_root, SSH_VARIABLES_ROOT, 0, 0, 0, KEY_WRITE | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &sa, &reg, NULL) == ERROR_SUCCESS)) {
+			replace = (RegQueryValueExA(reg, svar, 0, &oldtype, NULL, &loldval) == ERROR_SUCCESS && oldtype == REG_BINARY);
+			if ((stage++, RegSetValueExA(reg, svar, 0, REG_BINARY, val, lval) == ERROR_SUCCESS)) {
+				if (replace) {
+					debug("set '%.*s' = '%.*s' (replacing %d-byte old value)", lvar, var, lval, val, loldval);
+				} else {
+					debug("set '%.*s' = '%.*s'", lvar, var, lval, val);
+				}
+				success = 1;
+			}
+		}
 	}
-	v->val = val;
-	v->lval = lval;
-	buffer_put_char(response, replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS);
+	if (!success) {
+		error("failed to set '%.*s' = '%.*s' at stage %d", lvar, var, lval, val, stage);
+	}
+
+	if (oldval) free(oldval);
+	if (reg) RegCloseKey(reg);
+	if (user_root) RegCloseKey(user_root);
+	if (sa.lpSecurityDescriptor) LocalFree(sa.lpSecurityDescriptor);
+	if (svar) free(svar);
+	if (val) free(val);
+	if (var) free(var);
+
+	buffer_put_char(response, !success ? SSH_AGENT_FAILURE :
+														replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS);
 	return 0;
 }
 
@@ -1162,21 +1183,45 @@ process_set_variable(struct sshbuf* request, struct sshbuf* response, struct age
 int
 process_get_variable(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
 {
-	u_int lvar;
-	char *var;
-	Variable *v;
+	u_int lvar = 0;
+	DWORD lval = 0, type = 0;
+	char *var = 0, *val = 0;
+	LPSTR svar = 0;
+	int success = 0, stage = 0;
+	HKEY reg = 0, user_root = 0;
 
 	var= buffer_get_string(request, &lvar);
 
-	if ((v = lookup_variable(var, lvar))) {
-		debug("get '%.*s' -> '%.*s'", lvar, var, v->lval, v->val);
-		buffer_put_char(response, SSH_AGENT_GET_VARIABLE_ANSWER);
-		buffer_put_string(response, v->val, v->lval);
-	} else {
-		debug("variable '%.*s' not found", lvar, var);
+	svar = malloc(lvar + 1);
+	if (var && svar) {
+		memcpy(svar, var, lvar);
+		svar[lvar] = '\0';
+		if ((stage++, get_user_root(con, &user_root) == 0) &&
+				(stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_WOW64_64KEY | KEY_ENUMERATE_SUB_KEYS, &reg) == ERROR_SUCCESS) &&
+				(stage++, RegQueryValueExA(reg, svar, 0, &type, NULL, &lval) == ERROR_SUCCESS) &&
+				(stage++, (type == REG_BINARY)) &&
+				(stage++, (val = malloc(lval)) != NULL) &&
+				(stage++, RegQueryValueExA(reg, svar, 0, NULL, val, &lval) == ERROR_SUCCESS)) {
+			debug("get '%.*s' -> '%.*s'", lvar, var, lval, val);
+			buffer_put_char(response, SSH_AGENT_GET_VARIABLE_ANSWER);
+			buffer_put_string(response, val, lval);
+			success = 1;
+		}
+	}
+	if (!success) {
+		if (stage == 3) {
+			debug("variable '%.*s' not found", lvar, var);
+		} else {
+			debug("failed to get variable '%.*s' at stage %d", lvar, var, stage);
+		}
 		buffer_put_char(response, SSH_AGENT_NO_VARIABLE);
 	}
-	free(var);
+
+	if (val) free(val);
+	if (reg) RegCloseKey(reg);
+	if (user_root) RegCloseKey(user_root);
+	if (svar) free(svar);
+	if (var) free(var);
 	return 0;
 }
 
