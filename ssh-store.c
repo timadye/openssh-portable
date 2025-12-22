@@ -249,5 +249,6 @@ main(int argc, char **argv)
   
 done:
   ssh_close_authentication_socket(agent_fd);
-  return (ret > 0 ? ret-1 : 10);
+  return (ret == 0 ? 0 :
+          ret > 0 ? ret-1 : 10);
 }
