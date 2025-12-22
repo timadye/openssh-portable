@@ -1154,7 +1154,6 @@ process_set_variable(struct sshbuf* request, struct sshbuf* response, struct age
 	}
 	v->val = val;
 	v->lval = lval;
-	buffer_put_int(response, 1);
 	buffer_put_char(response, replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS);
 	return 0;
 }
@@ -1166,23 +1165,18 @@ process_get_variable(struct sshbuf* request, struct sshbuf* response, struct age
 	u_int lvar;
 	char *var;
 	Variable *v;
-	Buffer msg;
 
 	var= buffer_get_string(request, &lvar);
 
-	buffer_init(&msg);
 	if ((v = lookup_variable(var, lvar))) {
 		debug("get '%.*s' -> '%.*s'", lvar, var, v->lval, v->val);
-		buffer_put_char(&msg, SSH_AGENT_GET_VARIABLE_ANSWER);
-		buffer_put_string(&msg, v->val, v->lval);
+		buffer_put_char(response, SSH_AGENT_GET_VARIABLE_ANSWER);
+		buffer_put_string(response, v->val, v->lval);
 	} else {
 		debug("variable '%.*s' not found", lvar, var);
-		buffer_put_char(&msg, SSH_AGENT_NO_VARIABLE);
+		buffer_put_char(response, SSH_AGENT_NO_VARIABLE);
 	}
 	free(var);
-	buffer_put_int(response, buffer_len(&msg));
-	buffer_append(response, buffer_ptr(&msg), buffer_len(&msg));
-	buffer_free(&msg);
 	return 0;
 }
 
@@ -1190,7 +1184,7 @@ process_get_variable(struct sshbuf* request, struct sshbuf* response, struct age
 int
 process_list_variables(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con, char full)
 {
-	Buffer msg, msg2;
+	Buffer msg;
 	char *prefix;
 	u_int lprefix, nret = 0;
 	Variable *v;
@@ -1208,12 +1202,9 @@ process_list_variables(struct sshbuf* request, struct sshbuf* response, struct a
 		}
 	}
 	free(prefix);
-	buffer_init(&msg2);
-	buffer_put_char(&msg2, full ?
+	buffer_put_char(response, full ?
 			SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
-	buffer_put_int(&msg2, nret);
-	buffer_put_int(response, buffer_len(&msg)+buffer_len(&msg2));
-	buffer_append(response, buffer_ptr(&msg2), buffer_len(&msg2));
+	buffer_put_int(response, nret);
 	buffer_append(response, buffer_ptr(&msg), buffer_len(&msg));
 	buffer_free(&msg);
 	return 0;
@@ -1248,7 +1239,6 @@ process_remove_variable(struct sshbuf* request, struct sshbuf* response, struct 
 		success = 1;
 	}
 	free (var);
-	buffer_put_int(response, 1);
 	buffer_put_char(response,
 			success ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
 	return 0;
@@ -1281,7 +1271,6 @@ process_remove_all_variables(struct sshbuf* request, struct sshbuf* response, st
 	free(prefix);
 
 	/* Send success. */
-	buffer_put_int(response, 1);
 	buffer_put_char(response, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
 	return 0;
 }
