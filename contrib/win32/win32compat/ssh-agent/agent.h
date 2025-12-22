@@ -10,6 +10,8 @@
 #define SSH_KEYS_ROOT SSH_AGENT_ROOT L"\\" SSH_KEYS_KEY
 #define SSH_PKCS11_PROVIDERS_KEY L"PKCS11_Providers"
 #define SSH_PKCS11_PROVIDERS_ROOT SSH_AGENT_ROOT L"\\" SSH_PKCS11_PROVIDERS_KEY
+#define SSH_VARIABLES_KEY L"Variables"
+#define SSH_VARIABLES_ROOT SSH_AGENT_ROOT L"\\" SSH_VARIABLES_KEY
 /* Maximum number of recorded session IDs/hostkeys per connection */
 #define AGENT_MAX_SESSION_IDS		16
 /* Maximum size of session ID */
