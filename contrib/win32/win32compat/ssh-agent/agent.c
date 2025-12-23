@@ -98,8 +98,6 @@ agent_listen_loop()
 	DWORD  r;
 	HANDLE wait_events[2];
 
-	vartab_init();
-
 	wait_events[0] = event_stop_agent;
 	wait_events[1] = ol.hEvent;
 
