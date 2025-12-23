@@ -1,25 +1,59 @@
-Apply this patch to OpenSSH 9.3p1 and build as normal.
+Apply this patch to OpenSSH 9.5p1 and build as normal.
 This will make ssh-store as well as special versions of ssh-agent, scp, and sftp
 (these scp and sftp don't disable agent forwarding and don't use the new
 PermitLocalCommand option that is not supported by older versions of the ssh
 client - useful if scp/sftp use the system default ssh).
 
-With CentOS7 rpm, openssh-7.4p1-22.el7_9.src.rpm, it should be possible to
-build with static SSL libraries, if openssl-static rpm has been installed using:
-  rpm -ba --define "static_openssl 1" SPECS/openssh.spec
+Add make SSH_PROGRAM=ssh to get scp and sftp to use ssh from the PATH,
+rather than the hard-coded /usr/local/bin/ssh.
 
-Alternatively, on Linux, to make executables with static SSL libraries (libcrypto, in openssl-static rpm),
-make with:
+Cygwin build
+============
+
+1. Use setup.exe to install openssh src files.
+2.
+  cd /usr/src/openssh-9.3p1-1.src
+  cp /home/dev/openssh/openssh-portable/openssh-9.3p1-1.src.patch .
+  cygport openssh.cygport all
+
+CentOS7 build
+=============
+
+  yum install openssl-static
+  wget https://hepunx.rl.ac.uk/~adye/software/ssh-store6-c7.patch
+  wget https://hepunx.rl.ac.uk/~adye/software/openssh-7.4p1-6-x86_64-centos7-store.spec.patch
+  cp ssh-store6-c7.patch SOURCES/
+  patch -p0 < openssh-7.4p1-6-x86_64-centos7-store.spec.patch
+  rpmbuild -ba --define "static_openssl 1" SPECS/openssh.spec
+
+This builds with static SSL libraries, which should help ssh work with later OS versions (eg. Alma9).
+
+Other Linux
+===========
 
   LIBS="-Wl,-Bstatic -lcrypto -Wl,-Bdynamic -lutil -lcrypt -lresolv -ldl -lz" ./configure
+  make install DESTDIR=$PWD/bin
 
-(or 'make LIBS=...') or whatever configure lists as libraries (last line of summary) with
+This makes executables with static SSL libraries (libcrypto, in openssl-static rpm).
+Can also use 'make LIBS=...' or whatever configure lists as libraries (last line of summary) with
 -Wl,-Bstatic before the -lcrypto and -Wl,-Bdynamic after. Note that this only works for libcrypto
 (the other libraries need to be compiled with -fPIC), but that's OK as it is the
-only one that changes betweek CentOS7 and Alma9.
+only one that changes between CentOS7 and Alma9.
 
-Add SSH_PROGRAM=ssh to get scp and sftp to use ssh from the PATH, rather than
-the hard-coded /usr/local/bin/ssh.
+Windows build
+=============
+
+1. Start Visual Studio 2022
+2. Open contrib\win32\openssh\Win32-OpenSSH.sln
+3. Switch to Release build
+4. Build Solution
+5. output is in bin subdirectory
+
+The Windows ssh-agent sources are in contrib/win32/win32compat/ssh-agent.
+They store keys and variables in HKEY_CURRENT_USER\Software\OpenSSH, so they are
+persistent and specific for each user connecting with ssh-add/ssh-store.
+
+==============================================================================
 
 The following are instructions for compiling with OpenSSH 5.2p1 with a previous version of this patch...
 
@@ -50,3 +84,4 @@ cd /usr/work/adye/openssh-5.2p1-bin
 tar cf ../openssh-5.2p1-store-sun4x_510.tar `find * \! -type d`
 bzip2 ../openssh-5.2p1-store-sun4x_510.tar
 
+==============================================================================
