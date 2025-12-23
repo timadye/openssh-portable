@@ -38,7 +38,6 @@
 #endif
 #include "xmalloc.h"
 #include "buffer.h"
-#include "openbsd-compat/sys-queue.h"
 
 #pragma warning(push, 3)
 
@@ -47,21 +46,6 @@
 #define MAX_VALUE_DATA_LENGTH 2048
 
 extern int remote_add_provider;
-
-typedef struct variable {
-	TAILQ_ENTRY(variable) next;
-	char *var;
-	char *val;
-	u_int lvar;
-	u_int lval;
-} Variable;
-
-typedef struct {
-	int nentries;
-	TAILQ_HEAD(varqueue, variable) varlist;
-} Vartab;
-
-Vartab vartable;
 
 /* 
  * get registry root where keys are stored 
@@ -1085,35 +1069,6 @@ int process_keyagent_request(struct sshbuf* request, struct sshbuf* response, st
 }
 #endif
 
-void
-vartab_init(void)
-{
-	TAILQ_INIT(&vartable.varlist);
-	vartable.nentries = 0;
-}
-
-static void
-free_variable(Variable *v)
-{
-	free(v->var);
-	free(v->val);
-	free(v);
-}
-
-/* return variable entry for given name */
-static Variable *
-lookup_variable(const char *var, u_int lvar)
-{
-	Variable *v;
-
-	TAILQ_FOREACH(v, &vartable.varlist, next) {
-		if (lvar == v->lvar && 0 == memcmp(var, v->var, lvar))
-			return (v);
-	}
-	return (NULL);
-}
-
-
 int
 process_set_variable(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
 {
@@ -1183,7 +1138,7 @@ process_get_variable(struct sshbuf* request, struct sshbuf* response, struct age
 		memcpy(svar, var, lvar);
 		svar[lvar] = '\0';
 		if ((stage++, get_user_root(con, &user_root) == 0) &&
-				(stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_WOW64_64KEY | KEY_ENUMERATE_SUB_KEYS, &reg) == ERROR_SUCCESS) &&
+				(stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &reg) == ERROR_SUCCESS) &&
 				(stage++, RegQueryValueExA(reg, svar, 0, &type, NULL, &lval) == ERROR_SUCCESS) &&
 				(stage++, (type == REG_BINARY)) &&
 				(stage++, (val = malloc(lval)) != NULL) &&
@@ -1216,25 +1171,55 @@ int
 process_list_variables(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con, char full)
 {
 	Buffer msg;
-	char *prefix;
-	u_int lprefix, nret = 0;
-	Variable *v;
+	char *prefix = 0, *var = 0, *val = 0;
+	u_int lprefix = 0, nret = 0;
+	int success = 0, stage = 0;
+	DWORD nvar = 0, maxvar = 0, maxval = 0, index = 0, lvar, lval, type;
+	HKEY reg = 0, user_root = 0;
 
-	prefix= buffer_get_string(request, &lprefix);
-	debug("list '%.*s'", lprefix, prefix);
 	buffer_init(&msg);
-	TAILQ_FOREACH(v, &vartable.varlist, next) {
-		if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
-			if (full) debug("  -> '%.*s' = '%.*s'", v->lvar, v->var, v->lval, v->val);
-			else      debug("  -> '%.*s'",          v->lvar, v->var);
-			buffer_put_string(&msg, v->var, v->lvar);
-			if (full) buffer_put_string(&msg, v->val, v->lval);
-			nret++;
+
+	if ((stage++, get_user_root(con, &user_root) == 0) &&
+	    (stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &reg) == 0) &&
+			(stage++, RegQueryInfoKeyW(reg, NULL, NULL, NULL, NULL, NULL, NULL, &nvar, &maxvar, &maxval, NULL, NULL) == ERROR_SUCCESS) &&
+			(stage++, nvar > 0)) {
+		maxvar++;
+		maxval++;
+		var = malloc(maxvar);
+		if (full) val = malloc(maxval);
+		if (stage++, (var && (!full || val))) {
+			prefix= buffer_get_string(request, &lprefix);
+			success = 1;
+			if (prefix && lprefix > 0)
+				debug("list variables starting with '%.*s'", lprefix, prefix);
+			else
+				debug("list all variables");
+			while (1) {
+				lvar = maxvar;
+				lval = maxval;
+				type = 0;
+				if (RegEnumValueA(reg, index++, var, &lvar, NULL, &type, val, full ? &lval : NULL) != ERROR_SUCCESS) break;
+				if (type == REG_BINARY && (!prefix || lprefix == 0 || (lvar >= lprefix && 0 == memcmp (var, prefix, lprefix)))) {
+					if (full) debug("  -> '%.*s' = '%.*s'", lvar, var, lval, val);
+					else      debug("  -> '%.*s'",          lvar, var);
+					buffer_put_string(&msg, var, lvar);
+					if (full) buffer_put_string(&msg, val, lval);
+					nret++;
+				}
+			}
 		}
 	}
-	free(prefix);
-	buffer_put_char(response, full ?
-			SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
+	if (!success) {
+		error("failed to list variables at stage %d", stage);
+	}
+
+	if (val) free(val);
+	if (var) free(var);
+	if (prefix) free(prefix);
+	if (reg) RegCloseKey(reg);
+	if (user_root) RegCloseKey(user_root);
+
+	buffer_put_char(response, full ? SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
 	buffer_put_int(response, nret);
 	buffer_append(response, buffer_ptr(&msg), buffer_len(&msg));
 	buffer_free(&msg);
@@ -1245,61 +1230,101 @@ process_list_variables(struct sshbuf* request, struct sshbuf* response, struct a
 int
 process_remove_variable(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
 {
-	int success = 0;
-	u_int lvar;
-	char *var;
-	Variable *v;
+	u_int lvar = 0;
+	DWORD type = 0, lval = 0;
+	char *var = 0;
+	LPSTR svar = 0;
+	int stage = 0, success = 0;
+	HKEY reg = 0, user_root = 0;
 
 	var= buffer_get_string(request, &lvar);
+	svar = malloc(lvar + 1);
 
-	if ((v = lookup_variable(var, lvar))) {
-		/*
-		 * We have this key.  Free the old key.  Since we
-		 * don't want to leave empty slots in the middle of
-		 * the array, we actually free the key there and move
-		 * all the entries between the empty slot and the end
-		 * of the array.
-		 */
-		if (vartable.nentries < 1)
-			fatal("process_remove_identity: "
-						"internal error: vartable.nentries %d",
-						vartable.nentries);
-		TAILQ_REMOVE(&vartable.varlist, v, next);
-		free_variable (v);
-		vartable.nentries--;
-		success = 1;
+	if (var && svar) {
+		memcpy(svar, var, lvar);
+		svar[lvar] = '\0';
+		if ((stage++, get_user_root(con, &user_root) == 0) &&
+				(stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_64KEY, &reg) == ERROR_SUCCESS) &&
+				(stage++, RegQueryValueExA(reg, svar, 0, &type, NULL, &lval) == ERROR_SUCCESS) &&
+				(stage++, (type == REG_BINARY))) {
+			if (RegDeleteValueA (reg, svar) == ERROR_SUCCESS) {
+				debug("deleted variable '%.*s' (length %d)", lvar, var, lval);
+				success = 1;
+			} else {
+				error ("failed to delete variable '%.*s' (length %d)", lvar, var, lval);
+			}
+		} else {
+			if (stage == 3) {
+				debug("variable '%.*s' to delete not found", lvar, var);
+			} else {
+				error("failed to get variable '%.*s' at stage %d", lvar, var, stage);
+			}
+		}
 	}
-	free (var);
-	buffer_put_char(response,
-			success ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
+
+	if (reg) RegCloseKey(reg);
+	if (user_root) RegCloseKey(user_root);
+	if (svar) free(svar);
+	if (var) free(var);
+	buffer_put_char(response, success ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
 	return 0;
 }
 
 int
 process_remove_all_variables(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
 {
-	char *prefix;
-	u_int lprefix, ndel = 0;
-	Variable *v, *last = NULL;
+	char *prefix = 0, *var = 0;
+	LPSTR svar = 0;
+	u_int lprefix = 0, ndel = 0;
+	int success = 0, stage = 0;
+	DWORD nvar = 0, maxvar = 0, index = 0, lvar = 0, type;
+	HKEY reg = 0, user_root = 0;
 
-	prefix= buffer_get_string(request, &lprefix);
-	TAILQ_FOREACH(v, &vartable.varlist, next) {
-		if (last) {   /* don't remove variable until we've moved past it */
-			TAILQ_REMOVE(&vartable.varlist, last, next);
-			free_variable (last);
-			last = NULL;
-		}
-		if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
-			vartable.nentries--;
-			ndel++;
-			last = v;
+	if ((stage++, get_user_root(con, &user_root) == 0) &&
+			(stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, DELETE | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_64KEY, &reg) == 0) &&
+			(stage++, RegQueryInfoKeyW(reg, NULL, NULL, NULL, NULL, NULL, NULL, &nvar, &maxvar, NULL, NULL, NULL) == ERROR_SUCCESS)) {
+		prefix= buffer_get_string(request, &lprefix);
+		if (!prefix || lprefix == 0) {
+			debug("delete all %d variables", nvar);
+			if (stage++, RegDeleteTreeW(reg, NULL) == ERROR_SUCCESS) {
+				ndel = nvar;
+				success = 1;
+			}
+		} else {
+			maxvar++;
+			var = malloc(maxvar);
+			svar = malloc(maxvar);
+			if (stage++, var && svar) {
+				success = 1;
+				debug("delete all variables starting with '%.*s'", lprefix, prefix);
+				while (1) {
+					lvar = maxvar;
+					type = 0;
+					if (RegEnumValueA(reg, index++, var, &lvar, NULL, &type, NULL, NULL) != ERROR_SUCCESS) break;
+					if (type == REG_BINARY && (lprefix == 0 || (lvar >= lprefix && 0 == memcmp (var, prefix, lprefix)))) {
+						memcpy(svar, var, lvar);
+						svar[lvar] = '\0';
+						if (RegDeleteValueA (reg, svar) == ERROR_SUCCESS) {
+							debug("deleted variable '%.*s'", lvar, var);
+							ndel++;
+						} else {
+							error ("failed to delete variable '%.*s'", lvar, var);
+						}
+					}
+				}
+			}
 		}
 	}
-	if (last) {
-		TAILQ_REMOVE(&vartable.varlist, last, next);
-		free_variable (last);
+
+	if (!success) {
+		error("failed to delete variables at stage %d", stage);
 	}
-	free(prefix);
+
+	if (svar) free(svar);
+	if (var) free(var);
+	if (prefix) free(prefix);
+	if (reg) RegCloseKey(reg);
+	if (user_root) RegCloseKey(user_root);
 
 	/* Send success. */
 	buffer_put_char(response, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
