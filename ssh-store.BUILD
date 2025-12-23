@@ -43,15 +43,27 @@ only one that changes between CentOS7 and Alma9.
 Windows build
 =============
 
+The Windows ssh-agent sources are in contrib/win32/win32compat/ssh-agent.
+Keys and variables are stored in HKEY_CURRENT_USER\Software\OpenSSH, so they are
+persistent and specific for each user connecting with ssh-add/ssh-store.
+
 1. Start Visual Studio 2022
 2. Open contrib\win32\openssh\Win32-OpenSSH.sln
 3. Switch to Release build
 4. Build Solution
-5. output is in bin subdirectory
-
-The Windows ssh-agent sources are in contrib/win32/win32compat/ssh-agent.
-They store keys and variables in HKEY_CURRENT_USER\Software\OpenSSH, so they are
-persistent and specific for each user connecting with ssh-add/ssh-store.
+5. install:
+  cd bin\x64\Release
+  copy *.exe C:\Apps\OpenSSH
+  copy *.txt C:\Apps\OpenSSH
+6. configure custom ssh-agent service from an Administrator Command Prompt:
+  sc create ssh-agent-store binPath= "C:\Apps\OpenSSH\ssh-agent.exe" DisplayName= "OpenSSH Authentication Agent store"
+  sc description ssh-agent-store "Agent to hold private keys used for public key authentication. This version also supports ssh-store."
+  sc config ssh-agent-store start= auto
+  sc start ssh-agent-store
+7. To use Windows ssh-agent from Cygwin or WSL: install socat and https://github.com/albertony/npiperelay . Start with:
+  export SSH_AUTH_SOCK=/tmp/ssh-agent.$UID.sock
+  umask 077
+  setsid socat UNIX-LISTEN:"$SSH_AUTH_SOCK",fork EXEC:"npiperelay.exe -ei -s //./pipe/openssh-ssh-agent",nofork &
 
 ==============================================================================
 
