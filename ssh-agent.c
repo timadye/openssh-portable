@@ -989,86 +989,6 @@ send:
 }
 #endif /* ENABLE_PKCS11 */
 
-static int
-process_ext_session_bind(SocketEntry *e)
-{
-	int r, sid_match, key_match;
-	struct sshkey *key = NULL;
-	struct sshbuf *sid = NULL, *sig = NULL;
-	char *fp = NULL;
-	size_t i;
-	u_char fwd = 0;
-
-	debug2_f("entering");
-	if ((r = sshkey_froms(e->request, &key)) != 0 ||
-	    (r = sshbuf_froms(e->request, &sid)) != 0 ||
-	    (r = sshbuf_froms(e->request, &sig)) != 0 ||
-	    (r = sshbuf_get_u8(e->request, &fwd)) != 0) {
-		error_fr(r, "parse");
-		goto out;
-	}
-	if ((fp = sshkey_fingerprint(key, SSH_FP_HASH_DEFAULT,
-	    SSH_FP_DEFAULT)) == NULL)
-		fatal_f("fingerprint failed");
-	/* check signature with hostkey on session ID */
-	if ((r = sshkey_verify(key, sshbuf_ptr(sig), sshbuf_len(sig),
-	    sshbuf_ptr(sid), sshbuf_len(sid), NULL, 0, NULL)) != 0) {
-		error_fr(r, "sshkey_verify for %s %s", sshkey_type(key), fp);
-		goto out;
-	}
-	/* check whether sid/key already recorded */
-	for (i = 0; i < e->nsession_ids; i++) {
-		if (!e->session_ids[i].forwarded) {
-			error_f("attempt to bind session ID to socket "
-			    "previously bound for authentication attempt");
-			r = -1;
-			goto out;
-		}
-		sid_match = buf_equal(sid, e->session_ids[i].sid) == 0;
-		key_match = sshkey_equal(key, e->session_ids[i].key);
-		if (sid_match && key_match) {
-			debug_f("session ID already recorded for %s %s",
-			    sshkey_type(key), fp);
-			r = 0;
-			goto out;
-		} else if (sid_match) {
-			error_f("session ID recorded against different key "
-			    "for %s %s", sshkey_type(key), fp);
-			r = -1;
-			goto out;
-		}
-		/*
-		 * new sid with previously-seen key can happen, e.g. multiple
-		 * connections to the same host.
-		 */
-	}
-	/* record new key/sid */
-	if (e->nsession_ids >= AGENT_MAX_SESSION_IDS) {
-		error_f("too many session IDs recorded");
-		goto out;
-	}
-	e->session_ids = xrecallocarray(e->session_ids, e->nsession_ids,
-	    e->nsession_ids + 1, sizeof(*e->session_ids));
-	i = e->nsession_ids++;
-	debug_f("recorded %s %s (slot %zu of %d)", sshkey_type(key), fp, i,
-	    AGENT_MAX_SESSION_IDS);
-	e->session_ids[i].key = key;
-	e->session_ids[i].forwarded = fwd != 0;
-	key = NULL; /* transferred */
-	/* can't transfer sid; it's refcounted and scoped to request's life */
-	if ((e->session_ids[i].sid = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new");
-	if ((r = sshbuf_putb(e->session_ids[i].sid, sid)) != 0)
-		fatal_fr(r, "sshbuf_putb session ID");
-	/* success */
-	r = 0;
- out:
-	free(fp);
-	sshkey_free(key);
-	sshbuf_free(sid);
-	sshbuf_free(sig);
-	return r == 0 ? 1 : 0;
-}
 /* return variable entry for given name */
 static Variable *
 lookup_variable(const char *var, u_int lvar)
@@ -1248,25 +1168,6 @@ process_remove_all_variables(SocketEntry *e)
 	buffer_put_char(e->output, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
 }
 
-static void
-process_extension(SocketEntry *e)
-{
-	int r, success = 0;
-	char *name;
-
-	debug2_f("entering");
-	if ((r = sshbuf_get_cstring(e->request, &name, NULL)) != 0) {
-		error_fr(r, "parse");
-		goto send;
-	}
-	if (strcmp(name, "session-bind@openssh.com") == 0)
-		success = process_ext_session_bind(e);
-	else
-		debug_f("unsupported extension \"%s\"", name);
-	free(name);
-send:
-	send_status(e, success);
-}
 /*
  * dispatch incoming message.
  * returns 1 on success, 0 for incomplete messages or -1 on error.
@@ -1363,9 +1264,6 @@ process_message(u_int socknum)
 		process_remove_smartcard_key(e);
 		break;
 #endif /* ENABLE_PKCS11 */
-	case SSH_AGENTC_EXTENSION:
-		process_extension(e);
-		break;
 	case SSH_AGENTC_SET_VARIABLE:
 		process_set_variable(e);
 		break;
