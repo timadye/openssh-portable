@@ -1,0 +1,27 @@
+--- rpmbuild/SPECS/openssh.spec.orig	2025-12-18 01:47:40.000000000 +0000
++++ rpmbuild/SPECS/openssh.spec	2025-12-26 23:03:17.464002672 +0000
+@@ -304,6 +304,8 @@
+ Patch1026: openssh-8.7p1-reject-cntrl-chars-in-username.patch
+ # upstream 43b3bff47bb029f2299bacb6a36057981b39fdb0
+ Patch1027: openssh-8.7p1-reject-null-char-in-url-string.patch
++# ssh-store and special versions of ssh-agent, scp, and sftp (OpenSSH 8.7p1)
++Patch1028: ssh-store7-alma9.patch
+ 
+ License: BSD
+ Requires: /sbin/nologin
+@@ -536,6 +538,7 @@
+ %patch1025 -p1 -b .errcode_set
+ %patch1026 -p1 -b .reject-cntrl-chars-in-username
+ %patch1027 -p1 -b .reject-null-char-in-url-string
++%patch1028 -p1 -b .ssh-store
+ 
+ autoreconf
+ pushd pam_ssh_agent_auth-pam_ssh_agent_auth-%{pam_ssh_agent_ver}
+@@ -765,6 +768,7 @@
+ %attr(0644,root,root) %{_mandir}/man5/ssh_config.5*
+ %attr(0755,root,root) %{_bindir}/ssh-agent
+ %attr(0755,root,root) %{_bindir}/ssh-add
++%attr(0755,root,root) %{_bindir}/ssh-store
+ %attr(0755,root,root) %{_bindir}/ssh-keyscan
+ %attr(0755,root,root) %{_bindir}/sftp
+ %attr(0755,root,root) %{_bindir}/ssh-copy-id

@@ -16,8 +16,8 @@ Cygwin build
   cp /home/dev/openssh/openssh-portable/openssh-9.3p1-1.src.patch .
   cygport openssh.cygport all
 
-Alma9 build
-===========
+Alma9 build from openssh-portable
+=================================
 
   sudo dnf install openssl-devel zlib-devel pam-devel
   autoreconf
@@ -25,12 +25,31 @@ Alma9 build
 
 Alma9 (and RHEL9) doesn't provide statically linked OpenSSL libraries, as CentOS7 did.
 
+Alma9 build from source rpm
+===========================
+
+  sudo dnf groupinstall "Development Tools"
+  sudo dnf install rpm-build rpmdevtools dnf-plugins-core
+  sudo dnf config-manager --set-enabled crb  # Enable the CRB (CodeReady Builder) repository, which gives us libfido2-devel
+  sudo dnf download --source openssh
+  sudo dnf builddep openssh
+
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-alma9.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-8.7p1-47.el9_7.alma.1-store.spec.patch
+
+  rpmdev-setuptree
+  rpm -ivh openssh-8.7p1-47.el9_7.alma.1.src.rpm
+  cp ssh-store7-alma9.patch ~/rpmbuild/SOURCES/
+  (cd; patch -p0) < openssh-8.7p1-47.el9_7.alma.1-store.spec.patch
+
+  rpmbuild -ba ~/rpmbuild/SPECS/openssh.spec
+
 CentOS7 build
 =============
 
   yum install openssl-static
-  wget https://hepunx.rl.ac.uk/~adye/software/ssh-store6-c7.patch
-  wget https://hepunx.rl.ac.uk/~adye/software/openssh-7.4p1-6-x86_64-centos7-store.spec.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store6-c7.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-7.4p1-6-x86_64-centos7-store.spec.patch
   cp ssh-store6-c7.patch SOURCES/
   patch -p0 < openssh-7.4p1-6-x86_64-centos7-store.spec.patch
   rpmbuild -ba --define "static_openssl 1" SPECS/openssh.spec

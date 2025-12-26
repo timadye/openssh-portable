@@ -1,0 +1,28 @@
+--- ./SPECS/openssh.spec.orig	2021-11-24 16:06:30.000000000 +0000
++++ ./SPECS/openssh.spec	2023-06-07 23:20:37.000000000 +0100
+@@ -256,6 +256,8 @@
+ Patch962: openssh-7.4p1-uidswap.patch
+ # CVE-2021-41617
+ Patch978: openssh-8.7p1-upstream-cve-2021-41617.patch
++# ssh-store and special versions of ssh-agent, scp, and sftp (OpenSSH 7.4p1)
++Patch990: ssh-store6-c7.patch
+ 
+ License: BSD
+ Group: Applications/Internet
+@@ -520,6 +522,8 @@
+ 
+ %patch100 -p1 -b .coverity
+ 
++%patch990 -p1 -b .ssh-store
++
+ %if 0
+ # Nothing here yet
+ %endif
+@@ -761,6 +765,7 @@
+ %if ! %{rescue}
+ %attr(2111,root,nobody) %{_bindir}/ssh-agent
+ %attr(0755,root,root) %{_bindir}/ssh-add
++%attr(0755,root,root) %{_bindir}/ssh-store
+ %attr(0755,root,root) %{_bindir}/ssh-keyscan
+ %attr(0755,root,root) %{_bindir}/sftp
+ %attr(0755,root,root) %{_bindir}/ssh-copy-id
