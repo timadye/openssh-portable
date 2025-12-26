@@ -16,6 +16,15 @@ Cygwin build
   cp /home/dev/openssh/openssh-portable/openssh-9.3p1-1.src.patch .
   cygport openssh.cygport all
 
+Alma9 build
+===========
+
+  sudo dnf install openssl-devel zlib-devel pam-devel
+  autoreconf
+  ./configure --with-ssl-dir=/usr --prefix=/usr/local --sysconfdir=/etc/ssh --with-pam --with-selinux
+
+Alma9 (and RHEL9) doesn't provide statically linked OpenSSL libraries, as CentOS7 did.
+
 CentOS7 build
 =============
 
