@@ -34,9 +34,6 @@ Alma9 build from source rpm
   sudo dnf download --source openssh
   sudo dnf builddep openssh
 
-  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-alma9.patch
-  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-8.7p1-47.el9_7.alma.1-store.spec.patch
-
   rpmdev-setuptree
   rpm -ivh openssh-8.7p1-47.el9_7.alma.1.src.rpm
   cp ssh-store7-alma9.patch ~/rpmbuild/SOURCES/
@@ -48,8 +45,6 @@ CentOS7 build
 =============
 
   yum install openssl-static
-  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store6-c7.patch
-  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-7.4p1-6-x86_64-centos7-store.spec.patch
   cp ssh-store6-c7.patch SOURCES/
   patch -p0 < openssh-7.4p1-6-x86_64-centos7-store.spec.patch
   rpmbuild -ba --define "static_openssl 1" SPECS/openssh.spec
