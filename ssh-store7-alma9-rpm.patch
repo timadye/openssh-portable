@@ -836,18 +836,6 @@ index 000000000..56174394c
 +
 +#endif	/* BUFFER_H */
 +
-diff --git a/configure.ac b/configure.ac
-index 01e7d2a4f..55a4483c5 100644
---- a/configure.ac
-+++ b/configure.ac
-@@ -2762,6 +2762,7 @@ if test "x$openssl" = "xyes" ; then
- 			101*)   ;; # 1.1.x
- 			200*)   ;; # LibreSSL
- 			300*)   ;; # OpenSSL development branch.
-+			305*)   ;; # OpenSSL 3.5.x for Alma9 build
- 		        *)
- 				AC_MSG_ERROR([Unknown/unsupported OpenSSL version ("$ssl_library_ver")])
- 		                ;;
 diff --git a/.gitignore b/.gitignore
 index 5e4ae5a60..b9fb662e2 100644
 --- a/.gitignore
@@ -868,8 +856,8 @@ index b0293841a..8e4ade99b 100644
  
  .SUFFIXES: .lo
  
--TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) ssh-add$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT) ssh-sk-helper$(EXEEXT)
-+TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) ssh-add$(EXEEXT) ssh-store$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT) ssh-sk-helper$(EXEEXT)
+-TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) ssh-add$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT) ssh-sk-helper$(EXEEXT) ssh-keycat$(EXEEXT)
++TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) ssh-add$(EXEEXT) ssh-store$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT) ssh-sk-helper$(EXEEXT) ssh-keycat$(EXEEXT)
  
  XMSS_OBJS=\
  	ssh-xmss.o \

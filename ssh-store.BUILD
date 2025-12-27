@@ -7,21 +7,18 @@ client - useful if scp/sftp use the system default ssh).
 Add make SSH_PROGRAM=ssh to get scp and sftp to use ssh from the PATH,
 rather than the hard-coded /usr/local/bin/ssh.
 
-Cygwin build
-============
+Alma9 build from openssh-portable git repo
+==========================================
 
-1. Use setup.exe to install openssh src files.
-2.
-  cd /usr/src/openssh-9.3p1-1.src
-  cp /home/dev/openssh/openssh-portable/openssh-9.3p1-1.src.patch .
-  cygport openssh.cygport all
-
-Alma9 build from openssh-portable
-=================================
-
+  git clone https://github.com/openssh/openssh-portable.git
+  cd openssh-portable
+  git checkout V_8_7_P1
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-alma9.patch
+  patch < ssh-store7-alma9.patch
   sudo dnf install openssl-devel zlib-devel pam-devel
   autoreconf
-  ./configure --with-ssl-dir=/usr --prefix=/usr/local --sysconfdir=/etc/ssh --with-pam --with-selinux
+  ./configure
+  make -j4
 
 Alma9 (and RHEL9) doesn't provide statically linked OpenSSL libraries, as CentOS7 did.
 
@@ -36,7 +33,9 @@ Alma9 build from source rpm
 
   rpmdev-setuptree
   rpm -ivh openssh-8.7p1-47.el9_7.alma.1.src.rpm
-  cp ssh-store7-alma9.patch ~/rpmbuild/SOURCES/
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-alma9-rpm.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-8.7p1-47.el9_7.alma.1-store.spec.patch
+  cp ssh-store7-alma9-rpm.patch ~/rpmbuild/SOURCES/
   (cd; patch -p0) < openssh-8.7p1-47.el9_7.alma.1-store.spec.patch
 
   rpmbuild -ba ~/rpmbuild/SPECS/openssh.spec
@@ -45,8 +44,10 @@ CentOS7 build
 =============
 
   yum install openssl-static
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store6-c7.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-7.4p1-6-x86_64-centos7-store.spec.patch
   cp ssh-store6-c7.patch SOURCES/
-  patch -p0 < openssh-7.4p1-6-x86_64-centos7-store.spec.patch
+  patch < openssh-7.4p1-6-x86_64-centos7-store.spec.patch
   rpmbuild -ba --define "static_openssl 1" SPECS/openssh.spec
 
 This builds with static SSL libraries, which should help ssh work with later OS versions (eg. Alma9).
@@ -63,6 +64,15 @@ Can also use 'make LIBS=...' or whatever configure lists as libraries (last line
 (the other libraries need to be compiled with -fPIC), but that's OK as it is the
 only one that changes between CentOS7 and Alma9.
 
+Cygwin build
+============
+
+1. Use setup.exe to install openssh src files.
+2.
+  cd /usr/src/openssh-9.3p1-1.src
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-9.3p1-1.src.patch
+  cygport openssh.cygport all
+
 Windows build
 =============
 
@@ -70,20 +80,24 @@ The Windows ssh-agent sources are in contrib/win32/win32compat/ssh-agent.
 Keys and variables are stored in HKEY_CURRENT_USER\Software\OpenSSH, so they are
 persistent and specific for each user connecting with ssh-add/ssh-store.
 
-1. Start Visual Studio 2022
-2. Open contrib\win32\openssh\Win32-OpenSSH.sln
-3. Switch to Release build
-4. Build Solution
-5. install:
+1.
+  git clone https://github.com/PowerShell/openssh-portable.git
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-win32.patch
+  patch < ssh-store7-win32.patch
+2. Start Visual Studio 2022
+3. Open contrib\win32\openssh\Win32-OpenSSH.sln
+4. Switch to Release build
+5. Build Solution
+6. install:
   cd bin\x64\Release
   copy *.exe C:\Apps\OpenSSH
   copy *.txt C:\Apps\OpenSSH
-6. configure custom ssh-agent service from an Administrator Command Prompt:
+7. configure custom ssh-agent service from an Administrator Command Prompt:
   sc create ssh-agent-store binPath= "C:\Apps\OpenSSH\ssh-agent.exe" DisplayName= "OpenSSH Authentication Agent store"
   sc description ssh-agent-store "Agent to hold private keys used for public key authentication. This version also supports ssh-store."
   sc config ssh-agent-store start= auto
   sc start ssh-agent-store
-7. To use Windows ssh-agent from Cygwin or WSL: install socat and https://github.com/albertony/npiperelay . Start with:
+8. To use Windows ssh-agent from Cygwin or WSL: install socat and https://github.com/albertony/npiperelay . Start with:
   export SSH_AUTH_SOCK=/tmp/ssh-agent.$UID.sock
   umask 077
   setsid socat UNIX-LISTEN:"$SSH_AUTH_SOCK",fork EXEC:"npiperelay.exe -ei -s //./pipe/openssh-ssh-agent",nofork &
