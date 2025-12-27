@@ -1,0 +1,1595 @@
+Apply this patch to OpenSSH 8.7p1 and build as normal.
+This will make ssh-store as well as special versions of ssh-agent, scp, and sftp
+(these scp and sftp don't disable agent forwarding and don't use the new
+PermitLocalCommand option that is not supported by older versions of the ssh
+client - useful if scp/sftp use the system default ssh).
+
+Add make SSH_PROGRAM=ssh to get scp and sftp to use ssh from the PATH,
+rather than the hard-coded /usr/local/bin/ssh.
+
+Alma9 build from openssh-portable git repo
+==========================================
+
+  git clone https://github.com/openssh/openssh-portable.git
+  cd openssh-portable
+  git checkout V_8_7_P1
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-alma9.patch
+  patch < ssh-store7-alma9.patch
+  sudo dnf install openssl-devel zlib-devel pam-devel
+  autoreconf
+  ./configure
+  make -j4
+
+Alma9 (and RHEL9) doesn't provide statically linked OpenSSL libraries, as CentOS7 did.
+
+Alma9 build from source rpm
+===========================
+
+  sudo dnf groupinstall "Development Tools"
+  sudo dnf install rpm-build rpmdevtools dnf-plugins-core
+  sudo dnf config-manager --set-enabled crb  # Enable the CRB (CodeReady Builder) repository, which gives us libfido2-devel
+  sudo dnf download --source openssh
+  sudo dnf builddep openssh
+
+  rpmdev-setuptree
+  rpm -ivh openssh-8.7p1-47.el9_7.alma.1.src.rpm
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-alma9-rpm.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-8.7p1-47.el9_7.alma.1-store7.spec.patch
+  cp ssh-store7-alma9-rpm.patch ~/rpmbuild/SOURCES/
+  (cd; patch -p0) < openssh-8.7p1-47.el9_7.alma.1-store7.spec.patch
+
+  rpmbuild -ba ~/rpmbuild/SPECS/openssh.spec
+
+CentOS7 build
+=============
+
+  yum install openssl-static
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store6-c7.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-7.4p1-6-x86_64-centos7-store.spec.patch
+  cp ssh-store6-c7.patch SOURCES/
+  patch < openssh-7.4p1-6-x86_64-centos7-store.spec.patch
+  rpmbuild -ba --define "static_openssl 1" SPECS/openssh.spec
+
+This builds with static SSL libraries, which should help ssh work with later OS versions (eg. Alma9).
+
+Other Linux
+===========
+
+  LIBS="-Wl,-Bstatic -lcrypto -Wl,-Bdynamic -lutil -lcrypt -lresolv -ldl -lz" ./configure
+  make install DESTDIR=$PWD/bin
+
+This makes executables with static SSL libraries (libcrypto, in openssl-static rpm).
+Can also use 'make LIBS=...' or whatever configure lists as libraries (last line of summary) with
+-Wl,-Bstatic before the -lcrypto and -Wl,-Bdynamic after. Note that this only works for libcrypto
+(the other libraries need to be compiled with -fPIC), but that's OK as it is the
+only one that changes between CentOS7 and Alma9.
+
+Cygwin build
+============
+
+1. Use setup.exe to install openssh src files and build pre-requisites:
+  /setup-x86_64.exe -q -P openssh -s
+  /setup-x86_64.exe -q -P cygport,autoconf,automake,gcc-g++,make,libcrypt-devel,libedit-devel,libfido2-devel,libkrb5-devel,libssl-devel,zlib-devel
+2.
+  cd /usr/src/openssh-10.2p1-1.src
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-cygwin.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-10.2p1-1-x86_64-store7.cygport.patch
+  patch < openssh-10.2p1-1-x86_64-store7.cygport.patch
+  mkdir patches
+  mv ssh-store7-cygwin.patch patches/
+  cygport openssh.cygport all
+
+Windows build
+=============
+
+The Windows ssh-agent sources are in contrib/win32/win32compat/ssh-agent.
+Keys and variables are stored in HKEY_CURRENT_USER\Software\OpenSSH, so they are
+persistent and specific for each user connecting with ssh-add/ssh-store.
+
+1.
+  git clone https://github.com/PowerShell/openssh-portable.git
+  cd openssh-portable
+  git checkout v9.5.0.0
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-win32.patch
+  patch < ssh-store7-win32.patch
+2. Start Visual Studio 2022
+3. Open contrib\win32\openssh\Win32-OpenSSH.sln
+4. Switch to Release build
+5. Build Solution
+6. install:
+  cd bin\x64\Release
+  copy *.exe C:\Apps\OpenSSH
+  copy *.txt C:\Apps\OpenSSH
+7. configure custom ssh-agent service from an Administrator Command Prompt:
+  sc create ssh-agent-store binPath= "C:\Apps\OpenSSH\ssh-agent.exe" DisplayName= "OpenSSH Authentication Agent store"
+  sc description ssh-agent-store "Agent to hold private keys used for public key authentication. This version also supports ssh-store."
+  sc config ssh-agent-store start= auto
+  sc start ssh-agent-store
+8. To use Windows ssh-agent from Cygwin or WSL: install socat and https://github.com/albertony/npiperelay . Start with:
+  export SSH_AUTH_SOCK=/tmp/ssh-agent.$UID.sock
+  umask 077
+  setsid socat UNIX-LISTEN:"$SSH_AUTH_SOCK",fork EXEC:"npiperelay.exe -ei -s //./pipe/openssh-ssh-agent",nofork &
+
+==============================================================================
+
+The following are instructions for compiling with OpenSSH 5.2p1 with a previous version of this patch...
+
+I built openssh-5.2p1-store-i386_linux24.tar.bz2 on yakut02 (Scientific Linux 3.0.9) with:
+
+cd /usr/work/adye
+wget http://hepunx.rl.ac.uk/~adye/software/ssh-store4.patch
+wget -N ftp://ftp.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-5.2p1.tar.gz
+tar zxf openssh-5.2p1.tar.gz
+cd openssh-5.2p1
+patch -Zp1 < ../ssh-store4.patch
+./configure
+make install DESTDIR=/usr/work/adye/openssh-5.2p1-bin LIBS="-Wl,-Bstatic -lcrypto -lutil -lz -lnsl -lcrypt -lresolv -Wl,-Bdynamic" SSH_PROGRAM=ssh
+cd /usr/work/adye/openssh-5.2p1-bin
+find * \! -type d | tar cvjfT ../openssh-5.2p1-store-i386_linux24.tar.bz2 -
+
+I built openssh-5.2p1-store-sun4x_510.tar.bz2 on tersk01 (SunOS 5.10) with:
+
+wget http://hepunx.rl.ac.uk/~adye/software/ssh-store4.patch
+wget -N ftp://ftp.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-5.2p1.tar.gz
+gunzip openssh-5.2p1.tar.gz
+tar xf openssh-5.2p1.tar
+cd openssh-5.2p1
+patch -p1 < ../ssh-store4.patch
+./configure
+make install DESTDIR=/usr/work/adye/openssh-5.2p1-bin SSH_PROGRAM=ssh
+cd /usr/work/adye/openssh-5.2p1-bin
+tar cf ../openssh-5.2p1-store-sun4x_510.tar `find * \! -type d`
+bzip2 ../openssh-5.2p1-store-sun4x_510.tar
+
+==============================================================================
+diff --git a/authfd.c b/authfd.c
+index 9f092f7cf..d4ccbab61 100644
+--- a/authfd.c
++++ b/authfd.c
+@@ -52,6 +52,7 @@
+ #include "xmalloc.h"
+ #include "ssh.h"
+ #include "sshbuf.h"
++#include "buffer.h"
+ #include "sshkey.h"
+ #include "authfd.h"
+ #include "cipher.h"
+@@ -650,3 +651,155 @@ ssh_remove_all_identities(int sock, int version)
+ 	sshbuf_free(msg);
+ 	return r;
+ }
++
++int
++ssh_set_variable(int sock, const char *var, u_int lvar, const char *val, u_int lval)
++{
++	Buffer msg;
++	int type;
++
++	buffer_init(&msg);
++	buffer_put_char(&msg, SSH_AGENTC_SET_VARIABLE);
++  buffer_put_string(&msg, var, lvar);
++  buffer_put_string(&msg, val, lval);
++	if (ssh_request_reply(sock, &msg, &msg) != 0) {
++		buffer_free(&msg);
++		return 0;
++	}
++	type = buffer_get_char(&msg);
++	buffer_free(&msg);
++  if (type == SSH_AGENT_VARIABLE_REPLACED) return 2;
++	return decode_reply(type);
++}
++
++
++int
++ssh_get_variable(int sock, const char *var, u_int lvar, char **valp, u_int *lvalp)
++{
++	Buffer msg;
++	int ret = 0;
++	int type;
++
++  *valp= NULL;
++  if (lvalp) *lvalp= 0;
++	buffer_init(&msg);
++	buffer_put_char(&msg, SSH_AGENTC_GET_VARIABLE);
++  buffer_put_string(&msg, var, lvar);
++	if (ssh_request_reply(sock, &msg, &msg) != 0) {
++		buffer_free(&msg);
++		return 0;
++	}
++	type = buffer_get_char(&msg);
++	if (agent_failed(type)) {
++		logit("Agent could not get variable.");
++	} else if (type == SSH_AGENT_GET_VARIABLE_ANSWER) {
++		*valp = buffer_get_string(&msg, lvalp);
++		ret = 1;
++	} else if (type == SSH_AGENT_NO_VARIABLE) {
++    ret = 2;
++	} else {
++		fatal("Bad authentication response: %d", type);
++	}
++	buffer_free(&msg);
++	return ret;
++}
++
++
++/*
++ * Returns the first variable held by the agent.
++ */
++
++static int
++ssh_get_num_variables(int sock, const char *prefix, u_int lprefix, char full, Buffer *identities)
++{
++	Buffer request;
++	int type;
++  int howmany = 0;
++
++  if (!prefix) {
++    prefix = "";
++    lprefix = 0;
++  }
++	buffer_init(&request);
++	buffer_put_char(&request, full ? SSH_AGENTC_LIST_VARIABLES : SSH_AGENTC_LIST_VARIABLE_NAMES);
++  buffer_put_string(&request, prefix, lprefix);
++
++	buffer_init(identities);
++	if (ssh_request_reply(sock, &request, identities) != 0) {
++		buffer_free(&request);
++		return 0;
++	}
++	buffer_free(&request);
++
++	/* Get message type, and verify that we got a proper answer. */
++	type = buffer_get_char(identities);
++	if (agent_failed(type)) {
++		return 0;
++	} else if (type != (full ? SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER)) {
++		fatal("Bad authentication reply message type: %d", type);
++	}
++
++	/* Get the number of entries in the response and check it for sanity. */
++	howmany = buffer_get_int(identities);
++	if ((u_int)howmany > 1024)
++		fatal("Too many variables in agent's reply: %d",
++		    howmany);
++
++	return howmany;
++}
++
++int
++ssh_get_first_variable(int sock, const char *prefix, u_int lprefix, char full,
++                       char **varp, u_int *lvarp, char **valp, u_int *lvalp,
++                       Buffer *identities, int *howmany)
++{
++	/* get number of identities and return the first entry (if any). */
++	if ((*howmany = ssh_get_num_variables(sock, prefix, lprefix, full, identities)) > 0)
++		return ssh_get_next_variable(sock, full, varp, lvarp, valp, lvalp, identities, howmany);
++	return 0;
++}
++
++int
++ssh_get_next_variable(int sock, char full,
++                      char **varp, u_int *lvarp, char **valp, u_int *lvalp,
++                      Buffer *identities, int *howmany)
++{
++  *varp = *valp = NULL;
++  *lvarp = *lvalp = 0;
++	/* Return failure if no more entries. */
++	if (*howmany <= 0)
++		return 0;
++
++	/*
++	 * Get the next entry from the packet.  These will abort with a fatal
++	 * error if the packet is too short or contains corrupt data.
++	 */
++  *varp = buffer_get_string(identities, lvarp);
++  if (full) *valp = buffer_get_string(identities, lvalp);
++	/* Decrement the number of remaining entries. */
++	(*howmany)--;
++	return 1;
++}
++
++int
++ssh_delete_variable(int sock, const char *var, u_int lvar, char all)
++{
++	Buffer msg;
++	int type;
++  if (all && !var) {
++    var = "";
++    lvar = 0;
++  }
++
++	buffer_init(&msg);
++	buffer_put_char(&msg, all ? SSH_AGENTC_REMOVE_ALL_VARIABLES : SSH_AGENTC_REMOVE_VARIABLE);
++  buffer_put_string(&msg, var, lvar);
++	if (ssh_request_reply(sock, &msg, &msg) != 0) {
++		buffer_free(&msg);
++		return 0;
++	}
++	type = buffer_get_char(&msg);
++	buffer_free(&msg);
++  if (var && type == SSH_AGENT_NO_VARIABLE) return 2;
++	return decode_reply(type);
++}
+diff --git a/authfd.h b/authfd.h
+index 4fbf82f8c..c0d45a6f1 100644
+--- a/authfd.h
++++ b/authfd.h
+@@ -76,6 +76,22 @@ int	ssh_agent_sign(int sock, const struct sshkey *key,
+ #define SSH2_AGENTC_ADD_ID_CONSTRAINED		25
+ #define SSH_AGENTC_ADD_SMARTCARD_KEY_CONSTRAINED 26
+ 
++/* generic extension mechanism */
++#define SSH_AGENTC_EXTENSION			27
++
++/* ssh-store commands */
++#define SSH_AGENTC_SET_VARIABLE			40
++#define SSH_AGENT_VARIABLE_REPLACED		41
++#define SSH_AGENTC_GET_VARIABLE			42
++#define SSH_AGENT_GET_VARIABLE_ANSWER		43
++#define SSH_AGENT_NO_VARIABLE			44
++#define SSH_AGENTC_LIST_VARIABLE_NAMES		45
++#define SSH_AGENT_VARIABLE_NAMES_ANSWER		46
++#define SSH_AGENTC_LIST_VARIABLES		47
++#define SSH_AGENT_VARIABLES_ANSWER		48
++#define SSH_AGENTC_REMOVE_VARIABLE		49
++#define SSH_AGENTC_REMOVE_ALL_VARIABLES		50
++
+ #define	SSH_AGENT_CONSTRAIN_LIFETIME		1
+ #define	SSH_AGENT_CONSTRAIN_CONFIRM		2
+ #define	SSH_AGENT_CONSTRAIN_MAXSIGN		3
+@@ -91,4 +107,16 @@ int	ssh_agent_sign(int sock, const struct sshkey *key,
+ #define	SSH_AGENT_RSA_SHA2_256			0x02
+ #define	SSH_AGENT_RSA_SHA2_512			0x04
+ 
++typedef struct sshbuf Buffer;
++int
++ssh_set_variable(int, const char *, u_int, const char *, u_int);
++int
++ssh_get_variable(int, const char *, u_int, char **, u_int *);
++int
++ssh_get_first_variable(int, const char *, u_int, char, char **, u_int *, char **, u_int *, Buffer *, int *);
++int
++ssh_get_next_variable(int, char, char **, u_int *, char **, u_int *, Buffer *, int *);
++int
++ssh_delete_variable(int, const char *, u_int, char);
++
+ #endif				/* AUTHFD_H */
+diff --git a/bufaux.c b/bufaux.c
+new file mode 100644
+index 000000000..3976896a9
+--- /dev/null
++++ b/bufaux.c
+@@ -0,0 +1,259 @@
++/* $OpenBSD: bufaux.c,v 1.60 2014/04/30 05:29:56 djm Exp $ */
++/*
++ * Copyright (c) 2012 Damien Miller <djm@mindrot.org>
++ *
++ * Permission to use, copy, modify, and distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++/* Emulation wrappers for legacy OpenSSH buffer API atop sshbuf */
++
++#include "includes.h"
++
++#include <sys/types.h>
++
++#include "buffer.h"
++#include "log.h"
++#include "ssherr.h"
++
++int
++buffer_get_short_ret(u_short *v, Buffer *buffer)
++{
++	int ret;
++
++	if ((ret = sshbuf_get_u16(buffer, v)) != 0) {
++		error("%s: %s", __func__, ssh_err(ret));
++		return -1;
++	}
++	return 0;
++}
++
++u_short
++buffer_get_short(Buffer *buffer)
++{
++	u_short ret;
++
++	if (buffer_get_short_ret(&ret, buffer) == -1)
++		fatal("%s: buffer error", __func__);
++
++	return (ret);
++}
++
++int
++buffer_get_int_ret(u_int *v, Buffer *buffer)
++{
++	int ret;
++
++	if ((ret = sshbuf_get_u32(buffer, v)) != 0) {
++		error("%s: %s", __func__, ssh_err(ret));
++		return -1;
++	}
++	return 0;
++}
++
++u_int
++buffer_get_int(Buffer *buffer)
++{
++	u_int ret;
++
++	if (buffer_get_int_ret(&ret, buffer) == -1)
++		fatal("%s: buffer error", __func__);
++
++	return (ret);
++}
++
++int
++buffer_get_int64_ret(u_int64_t *v, Buffer *buffer)
++{
++	int ret;
++
++	if ((ret = sshbuf_get_u64(buffer, v)) != 0) {
++		error("%s: %s", __func__, ssh_err(ret));
++		return -1;
++	}
++	return 0;
++}
++
++u_int64_t
++buffer_get_int64(Buffer *buffer)
++{
++	u_int64_t ret;
++
++	if (buffer_get_int64_ret(&ret, buffer) == -1)
++		fatal("%s: buffer error", __func__);
++
++	return (ret);
++}
++
++void
++buffer_put_short(Buffer *buffer, u_short value)
++{
++	int ret;
++
++	if ((ret = sshbuf_put_u16(buffer, value)) != 0)
++		fatal("%s: %s", __func__, ssh_err(ret));
++}
++
++void
++buffer_put_int(Buffer *buffer, u_int value)
++{
++	int ret;
++
++	if ((ret = sshbuf_put_u32(buffer, value)) != 0)
++		fatal("%s: %s", __func__, ssh_err(ret));
++}
++
++void
++buffer_put_int64(Buffer *buffer, u_int64_t value)
++{
++	int ret;
++
++	if ((ret = sshbuf_put_u64(buffer, value)) != 0)
++		fatal("%s: %s", __func__, ssh_err(ret));
++}
++
++void *
++buffer_get_string_ret(Buffer *buffer, u_int *length_ptr)
++{
++	size_t len;
++	int ret;
++	u_char *value;
++
++	if ((ret = sshbuf_get_string(buffer, &value, &len)) != 0) {
++		error("%s: %s", __func__, ssh_err(ret));
++		return NULL;
++	}
++	if (length_ptr != NULL)
++		*length_ptr = len;  /* Safe: sshbuf never stores len > 2^31 */
++	return value;
++}
++
++void *
++buffer_get_string(Buffer *buffer, u_int *length_ptr)
++{
++	void *ret;
++
++	if ((ret = buffer_get_string_ret(buffer, length_ptr)) == NULL)
++		fatal("%s: buffer error", __func__);
++	return (ret);
++}
++
++char *
++buffer_get_cstring_ret(Buffer *buffer, u_int *length_ptr)
++{
++	size_t len;
++	int ret;
++	char *value;
++
++	if ((ret = sshbuf_get_cstring(buffer, &value, &len)) != 0) {
++		error("%s: %s", __func__, ssh_err(ret));
++		return NULL;
++	}
++	if (length_ptr != NULL)
++		*length_ptr = len;  /* Safe: sshbuf never stores len > 2^31 */
++	return value;
++}
++
++char *
++buffer_get_cstring(Buffer *buffer, u_int *length_ptr)
++{
++	char *ret;
++
++	if ((ret = buffer_get_cstring_ret(buffer, length_ptr)) == NULL)
++		fatal("%s: buffer error", __func__);
++	return ret;
++}
++
++const void *
++buffer_get_string_ptr_ret(Buffer *buffer, u_int *length_ptr)
++{
++	size_t len;
++	int ret;
++	const u_char *value;
++
++	if ((ret = sshbuf_get_string_direct(buffer, &value, &len)) != 0) {
++		error("%s: %s", __func__, ssh_err(ret));
++		return NULL;
++	}
++	if (length_ptr != NULL)
++		*length_ptr = len;  /* Safe: sshbuf never stores len > 2^31 */
++	return value;
++}
++
++const void *
++buffer_get_string_ptr(Buffer *buffer, u_int *length_ptr)
++{
++	const void *ret;
++
++	if ((ret = buffer_get_string_ptr_ret(buffer, length_ptr)) == NULL)
++		fatal("%s: buffer error", __func__);
++	return (ret);
++}
++
++void
++buffer_put_string(Buffer *buffer, const void *buf, u_int len)
++{
++	int ret;
++
++	if ((ret = sshbuf_put_string(buffer, buf, len)) != 0)
++		fatal("%s: %s", __func__, ssh_err(ret));
++}
++
++void
++buffer_put_cstring(Buffer *buffer, const char *s)
++{
++	int ret;
++
++	if ((ret = sshbuf_put_cstring(buffer, s)) != 0)
++		fatal("%s: %s", __func__, ssh_err(ret));
++}
++
++int
++buffer_get_char_ret(char *v, Buffer *buffer)
++{
++	int ret;
++
++	if ((ret = sshbuf_get_u8(buffer, (u_char *)v)) != 0) {
++		error("%s: %s", __func__, ssh_err(ret));
++		return -1;
++	}
++	return 0;
++}
++
++int
++buffer_get_char(Buffer *buffer)
++{
++	char ch;
++
++	if (buffer_get_char_ret(&ch, buffer) == -1)
++		fatal("%s: buffer error", __func__);
++	return (u_char) ch;
++}
++
++void
++buffer_put_char(Buffer *buffer, int value)
++{
++	int ret;
++
++	if ((ret = sshbuf_put_u8(buffer, value)) != 0)
++		fatal("%s: %s", __func__, ssh_err(ret));
++}
++
++void
++buffer_put_bignum2_from_string(Buffer *buffer, const u_char *s, u_int l)
++{
++	int ret;
++
++	if ((ret = sshbuf_put_bignum2_bytes(buffer, s, l)) != 0)
++		fatal("%s: %s", __func__, ssh_err(ret));
++}
++
+diff --git a/buffer.c b/buffer.c
+new file mode 100644
+index 000000000..c5f708ab2
+--- /dev/null
++++ b/buffer.c
+@@ -0,0 +1,118 @@
++/* $OpenBSD: buffer.c,v 1.36 2014/04/30 05:29:56 djm Exp $ */
++
++/*
++ * Copyright (c) 2012 Damien Miller <djm@mindrot.org>
++ *
++ * Permission to use, copy, modify, and distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++/* Emulation wrappers for legacy OpenSSH buffer API atop sshbuf */
++
++#include "includes.h"
++
++#include <sys/types.h>
++
++#include "buffer.h"
++#include "log.h"
++#include "ssherr.h"
++
++void
++buffer_append(Buffer *buffer, const void *data, u_int len)
++{
++	int ret;
++
++	if ((ret = sshbuf_put(buffer, data, len)) != 0)
++		fatal("%s: %s", __func__, ssh_err(ret));
++}
++
++void *
++buffer_append_space(Buffer *buffer, u_int len)
++{
++	int ret;
++	u_char *p;
++
++	if ((ret = sshbuf_reserve(buffer, len, &p)) != 0)
++		fatal("%s: %s", __func__, ssh_err(ret));
++	return p;
++}
++
++int
++buffer_check_alloc(Buffer *buffer, u_int len)
++{
++	int ret = sshbuf_check_reserve(buffer, len);
++
++	if (ret == 0)
++		return 1;
++	if (ret == SSH_ERR_NO_BUFFER_SPACE)
++		return 0;
++	fatal("%s: %s", __func__, ssh_err(ret));
++}
++
++int
++buffer_get_ret(Buffer *buffer, void *buf, u_int len)
++{
++	int ret;
++
++	if ((ret = sshbuf_get(buffer, buf, len)) != 0) {
++		error("%s: %s", __func__, ssh_err(ret));
++		return -1;
++	}
++	return 0;
++}
++
++void
++buffer_get(Buffer *buffer, void *buf, u_int len)
++{
++	if (buffer_get_ret(buffer, buf, len) == -1)
++		fatal("%s: buffer error", __func__);
++}
++
++int
++buffer_consume_ret(Buffer *buffer, u_int bytes)
++{
++	int ret = sshbuf_consume(buffer, bytes);
++
++	if (ret == 0)
++		return 0;
++	if (ret == SSH_ERR_MESSAGE_INCOMPLETE)
++		return -1;
++	fatal("%s: %s", __func__, ssh_err(ret));
++}
++
++void
++buffer_consume(Buffer *buffer, u_int bytes)
++{
++	if (buffer_consume_ret(buffer, bytes) == -1)
++		fatal("%s: buffer error", __func__);
++}
++
++int
++buffer_consume_end_ret(Buffer *buffer, u_int bytes)
++{
++	int ret = sshbuf_consume_end(buffer, bytes);
++
++	if (ret == 0)
++		return 0;
++	if (ret == SSH_ERR_MESSAGE_INCOMPLETE)
++		return -1;
++	fatal("%s: %s", __func__, ssh_err(ret));
++}
++
++void
++buffer_consume_end(Buffer *buffer, u_int bytes)
++{
++	if (buffer_consume_end_ret(buffer, bytes) == -1)
++		fatal("%s: buffer error", __func__);
++}
++
++
+diff --git a/buffer.h b/buffer.h
+new file mode 100644
+index 000000000..56174394c
+--- /dev/null
++++ b/buffer.h
+@@ -0,0 +1,95 @@
++/* $OpenBSD: buffer.h,v 1.26 2017/04/30 23:23:54 djm Exp $ */
++
++/*
++ * Copyright (c) 2012 Damien Miller <djm@mindrot.org>
++ *
++ * Permission to use, copy, modify, and distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++/* Emulation wrappers for legacy OpenSSH buffer API atop sshbuf */
++
++#ifndef BUFFER_H
++#define BUFFER_H
++
++#include "sshbuf.h"
++
++typedef struct sshbuf Buffer;
++
++#define buffer_init(b)		sshbuf_init(b)
++#define buffer_clear(b)		sshbuf_reset(b)
++#define buffer_free(b)		sshbuf_free(b)
++#define buffer_dump(b)		sshbuf_dump(b, stderr)
++
++/* XXX cast is safe: sshbuf never stores more than len 2^31 */
++#define buffer_len(b)		((u_int) sshbuf_len(b))
++#define	buffer_ptr(b)		sshbuf_mutable_ptr(b)
++
++void	 buffer_append(Buffer *, const void *, u_int);
++void	*buffer_append_space(Buffer *, u_int);
++int	 buffer_check_alloc(Buffer *, u_int);
++void	 buffer_get(Buffer *, void *, u_int);
++
++void	 buffer_consume(Buffer *, u_int);
++void	 buffer_consume_end(Buffer *, u_int);
++
++
++int	 buffer_get_ret(Buffer *, void *, u_int);
++int	 buffer_consume_ret(Buffer *, u_int);
++int	 buffer_consume_end_ret(Buffer *, u_int);
++
++#include <openssl/objects.h>
++#include <openssl/bn.h>
++void    buffer_put_bignum2(Buffer *, const BIGNUM *);
++void	buffer_get_bignum2(Buffer *, BIGNUM *);
++void	buffer_put_bignum2_from_string(Buffer *, const u_char *, u_int);
++
++u_short	buffer_get_short(Buffer *);
++void	buffer_put_short(Buffer *, u_short);
++
++u_int	buffer_get_int(Buffer *);
++void    buffer_put_int(Buffer *, u_int);
++
++u_int64_t buffer_get_int64(Buffer *);
++void	buffer_put_int64(Buffer *, u_int64_t);
++
++int     buffer_get_char(Buffer *);
++void    buffer_put_char(Buffer *, int);
++
++void   *buffer_get_string(Buffer *, u_int *);
++const void *buffer_get_string_ptr(Buffer *, u_int *);
++void    buffer_put_string(Buffer *, const void *, u_int);
++char   *buffer_get_cstring(Buffer *, u_int *);
++void	buffer_put_cstring(Buffer *, const char *);
++
++#define buffer_skip_string(b) (void)buffer_get_string_ptr(b, NULL);
++
++int	buffer_put_bignum2_ret(Buffer *, const BIGNUM *);
++int	buffer_get_bignum2_ret(Buffer *, BIGNUM *);
++int	buffer_get_short_ret(u_short *, Buffer *);
++int	buffer_get_int_ret(u_int *, Buffer *);
++int	buffer_get_int64_ret(u_int64_t *, Buffer *);
++void	*buffer_get_string_ret(Buffer *, u_int *);
++char	*buffer_get_cstring_ret(Buffer *, u_int *);
++const void *buffer_get_string_ptr_ret(Buffer *, u_int *);
++int	buffer_get_char_ret(char *, Buffer *);
++
++#ifdef OPENSSL_HAS_ECC
++#include <openssl/ec.h>
++int	buffer_put_ecpoint_ret(Buffer *, const EC_GROUP *, const EC_POINT *);
++void	buffer_put_ecpoint(Buffer *, const EC_GROUP *, const EC_POINT *);
++int	buffer_get_ecpoint_ret(Buffer *, const EC_GROUP *, EC_POINT *);
++void	buffer_get_ecpoint(Buffer *, const EC_GROUP *, EC_POINT *);
++#endif
++
++#endif	/* BUFFER_H */
++
+diff --git a/configure.ac b/configure.ac
+index 01e7d2a4f..55a4483c5 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -2762,6 +2762,7 @@ if test "x$openssl" = "xyes" ; then
+ 			101*)   ;; # 1.1.x
+ 			200*)   ;; # LibreSSL
+ 			300*)   ;; # OpenSSL development branch.
++			305*)   ;; # OpenSSL 3.5.x for Alma9 build
+ 		        *)
+ 				AC_MSG_ERROR([Unknown/unsupported OpenSSL version ("$ssl_library_ver")])
+ 		                ;;
+diff --git a/.gitignore b/.gitignore
+index 5e4ae5a60..b9fb662e2 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -24,6 +24,7 @@ sftp
+ sftp-server
+ ssh
+ ssh-add
++ssh-store
+ ssh-agent
+ ssh-keygen
+ ssh-keyscan
+diff --git a/Makefile.in b/Makefile.in
+index b0293841a..8e4ade99b 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -67,7 +67,7 @@ MKDIR_P=@MKDIR_P@
+ 
+ .SUFFIXES: .lo
+ 
+-TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) ssh-add$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT) ssh-sk-helper$(EXEEXT)
++TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) ssh-add$(EXEEXT) ssh-store$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT) ssh-sk-helper$(EXEEXT)
+ 
+ XMSS_OBJS=\
+ 	ssh-xmss.o \
+@@ -82,6 +82,8 @@ LIBOPENSSH_OBJS=\
+ 	ssh_api.o \
+ 	ssherr.o \
+ 	sshbuf.o \
++	buffer.o \
++	bufaux.o \
+ 	sshkey.o \
+ 	sshbuf-getput-basic.o \
+ 	sshbuf-misc.o \
+@@ -137,6 +139,8 @@ SCP_OBJS=	scp.o progressmeter.o $(SFTP_CLIENT_OBJS)
+ 
+ SSHADD_OBJS=	ssh-add.o $(SKOBJS)
+ 
++SSHSTORE_OBJS=	ssh-store.o $(SKOBJS)
++
+ SSHAGENT_OBJS=	ssh-agent.o ssh-pkcs11-client.o $(SKOBJS)
+ 
+ SSHKEYGEN_OBJS=	ssh-keygen.o sshsig.o $(SKOBJS)
+@@ -218,6 +222,9 @@ scp$(EXEEXT): $(LIBCOMPAT) libssh.a $(SCP_OBJS)
+ ssh-add$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHADD_OBJS)
+ 	$(LD) -o $@ $(SSHADD_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
+ 
++ssh-store$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHSTORE_OBJS)
++	$(LD) -o $@ $(SSHSTORE_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
++
+ ssh-agent$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHAGENT_OBJS)
+ 	$(LD) -o $@ $(SSHAGENT_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
+ 
+@@ -395,6 +402,7 @@ install-files:
+ 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh$(EXEEXT) $(DESTDIR)$(bindir)/ssh$(EXEEXT)
+ 	$(INSTALL) -m 0755 $(STRIP_OPT) scp$(EXEEXT) $(DESTDIR)$(bindir)/scp$(EXEEXT)
+ 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-add$(EXEEXT) $(DESTDIR)$(bindir)/ssh-add$(EXEEXT)
++	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-store$(EXEEXT) $(DESTDIR)$(bindir)/ssh-store$(EXEEXT)
+ 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-agent$(EXEEXT) $(DESTDIR)$(bindir)/ssh-agent$(EXEEXT)
+ 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-keygen$(EXEEXT) $(DESTDIR)$(bindir)/ssh-keygen$(EXEEXT)
+ 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-keyscan$(EXEEXT) $(DESTDIR)$(bindir)/ssh-keyscan$(EXEEXT)
+@@ -471,6 +479,7 @@ uninstall:
+ 	-rm -f $(DESTDIR)$(bindir)/ssh$(EXEEXT)
+ 	-rm -f $(DESTDIR)$(bindir)/scp$(EXEEXT)
+ 	-rm -f $(DESTDIR)$(bindir)/ssh-add$(EXEEXT)
++	-rm -f $(DESTDIR)$(bindir)/ssh-store$(EXEEXT)
+ 	-rm -f $(DESTDIR)$(bindir)/ssh-agent$(EXEEXT)
+ 	-rm -f $(DESTDIR)$(bindir)/ssh-keygen$(EXEEXT)
+ 	-rm -f $(DESTDIR)$(bindir)/ssh-keyscan$(EXEEXT)
+diff --git a/scp.c b/scp.c
+index e039350c6..759dfdf9a 100644
+--- a/scp.c
++++ b/scp.c
+@@ -474,7 +474,6 @@ main(int argc, char **argv)
+ 	args.list = remote_remote_args.list = NULL;
+ 	addargs(&args, "%s", ssh_program);
+ 	addargs(&args, "-x");
+-	addargs(&args, "-oPermitLocalCommand=no");
+ 	addargs(&args, "-oClearAllForwardings=yes");
+ 	addargs(&args, "-oRemoteCommand=none");
+ 	addargs(&args, "-oRequestTTY=no");
+diff --git a/sftp.c b/sftp.c
+index 69f84cdcf..82d2a42f8 100644
+--- a/sftp.c
++++ b/sftp.c
+@@ -2371,7 +2371,6 @@ main(int argc, char **argv)
+ 	args.list = NULL;
+ 	addargs(&args, "%s", ssh_program);
+ 	addargs(&args, "-oForwardX11 no");
+-	addargs(&args, "-oPermitLocalCommand no");
+ 	addargs(&args, "-oClearAllForwardings yes");
+ 
+ 	ll = SYSLOG_LEVEL_INFO;
+diff --git a/ssh-agent.c b/ssh-agent.c
+index 48a47d45a..b86cc0a77 100644
+--- a/ssh-agent.c
++++ b/ssh-agent.c
+@@ -79,6 +79,7 @@
+ #include "ssh.h"
+ #include "ssh2.h"
+ #include "sshbuf.h"
++#include "buffer.h"
+ #include "sshkey.h"
+ #include "authfd.h"
+ #include "compat.h"
+@@ -137,6 +138,21 @@ struct idtable {
+ /* private key table */
+ struct idtable *idtab;
+ 
++typedef struct variable {
++	TAILQ_ENTRY(variable) next;
++	char *var;
++	char *val;
++	u_int lvar;
++	u_int lval;
++} Variable;
++
++typedef struct {
++	int nentries;
++	TAILQ_HEAD(varqueue, variable) varlist;
++} Vartab;
++
++Vartab vartable;
++
+ int max_fd = 0;
+ 
+ /* pid of shell == parent of agent */
+@@ -191,6 +207,13 @@ idtab_init(void)
+ 	idtab->nentries = 0;
+ }
+ 
++static void
++vartab_init(void)
++{
++  TAILQ_INIT(&vartable.varlist);
++  vartable.nentries = 0;
++}
++
+ static void
+ free_identity(Identity *id)
+ {
+@@ -201,6 +224,14 @@ free_identity(Identity *id)
+ 	free(id);
+ }
+ 
++static void
++free_variable(Variable *v)
++{
++  free(v->var);
++  free(v->val);
++	free(v);
++}
++
+ /* return matching private key for given public key */
+ static Identity *
+ lookup_identity(struct sshkey *key)
+@@ -958,6 +989,185 @@ send:
+ }
+ #endif /* ENABLE_PKCS11 */
+ 
++/* return variable entry for given name */
++static Variable *
++lookup_variable(const char *var, u_int lvar)
++{
++	Variable *v;
++
++	TAILQ_FOREACH(v, &vartable.varlist, next) {
++		if (lvar == v->lvar && 0 == memcmp(var, v->var, lvar))
++      return (v);
++	}
++	return (NULL);
++}
++
++
++static void
++process_set_variable(SocketEntry *e)
++{
++	u_int lvar, lval;
++	char *var, *val;
++  Variable *v;
++  int replace = 0;
++
++  var= buffer_get_string(e->request, &lvar);
++  val= buffer_get_string(e->request, &lval);
++
++  if ((v = lookup_variable(var, lvar))) {
++    debug("set '%.*s' = '%.*s' (replacing old value '%.*s')", lvar, var, lval, val, v->lval, v->val);
++    free(var);
++    free(v->val);
++    replace = 1;
++  } else {
++    debug("set '%.*s' = '%.*s'", lvar, var, lval, val);
++    v = xmalloc(sizeof(Variable));
++    v->var = var;
++    v->lvar = lvar;
++    TAILQ_INSERT_TAIL(&vartable.varlist, v, next);
++    vartable.nentries++;
++  }
++  v->val = val;
++  v->lval = lval;
++	buffer_put_int(e->output, 1);
++	buffer_put_char(e->output, replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS);
++}
++
++
++static void
++process_get_variable(SocketEntry *e)
++{
++	u_int lvar;
++	char *var;
++  Variable *v;
++	Buffer msg;
++
++  var= buffer_get_string(e->request, &lvar);
++
++	buffer_init(&msg);
++  if ((v = lookup_variable(var, lvar))) {
++    debug("get '%.*s' -> '%.*s'", lvar, var, v->lval, v->val);
++    buffer_put_char(&msg, SSH_AGENT_GET_VARIABLE_ANSWER);
++    buffer_put_string(&msg, v->val, v->lval);
++  } else {
++    debug("variable '%.*s' not found", lvar, var);
++    buffer_put_char(&msg, SSH_AGENT_NO_VARIABLE);
++  }
++  free(var);
++	buffer_put_int(e->output, buffer_len(&msg));
++	buffer_append(e->output, buffer_ptr(&msg), buffer_len(&msg));
++	buffer_free(&msg);
++}
++
++/* send list of variables */
++static void
++process_list_variables(SocketEntry *e, char full)
++{
++	Buffer msg, msg2;
++  char *prefix;
++  u_int lprefix, nret = 0;
++  Variable *v;
++
++  prefix= buffer_get_string(e->request, &lprefix);
++	buffer_init(&msg);
++	TAILQ_FOREACH(v, &vartable.varlist, next) {
++    if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
++      buffer_put_string(&msg, v->var, v->lvar);
++      if (full) buffer_put_string(&msg, v->val, v->lval);
++      nret++;
++    }
++	}
++  free(prefix);
++	buffer_init(&msg2);
++	buffer_put_char(&msg2, full ?
++	    SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
++	buffer_put_int(&msg2, nret);
++	buffer_put_int(e->output, buffer_len(&msg)+buffer_len(&msg2));
++	buffer_append(e->output, buffer_ptr(&msg2), buffer_len(&msg2));
++	buffer_append(e->output, buffer_ptr(&msg), buffer_len(&msg));
++	buffer_free(&msg);
++}
++
++static void
++no_variables(SocketEntry *e, u_int type)
++{
++	Buffer msg;
++
++	buffer_init(&msg);
++	buffer_put_char(&msg,
++	    (type == SSH_AGENTC_LIST_VARIABLES) ?
++	    SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
++	buffer_put_int(&msg, 0);
++	buffer_put_int(e->output, buffer_len(&msg));
++	buffer_append(e->output, buffer_ptr(&msg), buffer_len(&msg));
++	buffer_free(&msg);
++}
++
++/* shared */
++static void
++process_remove_variable(SocketEntry *e)
++{
++	int success = 0;
++	u_int lvar;
++	char *var;
++  Variable *v;
++
++  var= buffer_get_string(e->request, &lvar);
++
++  if ((v = lookup_variable(var, lvar))) {
++    /*
++     * We have this key.  Free the old key.  Since we
++     * don't want to leave empty slots in the middle of
++     * the array, we actually free the key there and move
++     * all the entries between the empty slot and the end
++     * of the array.
++     */
++    if (vartable.nentries < 1)
++      fatal("process_remove_identity: "
++				    "internal error: vartable.nentries %d",
++				    vartable.nentries);
++    TAILQ_REMOVE(&vartable.varlist, v, next);
++    free_variable (v);
++    vartable.nentries--;
++    success = 1;
++	}
++  free (var);
++	buffer_put_int(e->output, 1);
++	buffer_put_char(e->output,
++	    success ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
++}
++
++static void
++process_remove_all_variables(SocketEntry *e)
++{
++  char *prefix;
++  u_int lprefix, ndel = 0;
++  Variable *v, *last = NULL;
++
++  prefix= buffer_get_string(e->request, &lprefix);
++	TAILQ_FOREACH(v, &vartable.varlist, next) {
++    if (last) {   /* don't remove variable until we've moved past it */
++      TAILQ_REMOVE(&vartable.varlist, last, next);
++      free_variable (last);
++      last = NULL;
++    }
++    if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
++      vartable.nentries--;
++      ndel++;
++      last = v;
++    }
++	}
++  if (last) {
++    TAILQ_REMOVE(&vartable.varlist, last, next);
++    free_variable (last);
++  }
++  free(prefix);
++
++	/* Send success. */
++	buffer_put_int(e->output, 1);
++	buffer_put_char(e->output, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
++}
++
+ /*
+  * dispatch incoming message.
+  * returns 1 on success, 0 for incomplete messages or -1 on error.
+@@ -1009,6 +1219,10 @@ process_message(u_int socknum)
+ 			/* send empty lists */
+ 			no_identities(e);
+ 			break;
++    case SSH_AGENTC_LIST_VARIABLE_NAMES:
++    case SSH_AGENTC_LIST_VARIABLES:
++      no_variables(e, type);
++      break;
+ 		default:
+ 			/* send a fail message for all other request types */
+ 			send_status(e, 0);
+@@ -1050,6 +1264,24 @@ process_message(u_int socknum)
+ 		process_remove_smartcard_key(e);
+ 		break;
+ #endif /* ENABLE_PKCS11 */
++	case SSH_AGENTC_SET_VARIABLE:
++		process_set_variable(e);
++		break;
++	case SSH_AGENTC_GET_VARIABLE:
++		process_get_variable(e);
++		break;
++	case SSH_AGENTC_LIST_VARIABLE_NAMES:
++		process_list_variables(e, 0);
++		break;
++	case SSH_AGENTC_LIST_VARIABLES:
++		process_list_variables(e, 1);
++		break;
++	case SSH_AGENTC_REMOVE_VARIABLE:
++		process_remove_variable(e);
++		break;
++	case SSH_AGENTC_REMOVE_ALL_VARIABLES:
++		process_remove_all_variables(e);
++		break;
+ 	default:
+ 		/* Unknown message.  Respond with failure. */
+ 		error("Unknown message %d", type);
+@@ -1614,7 +1846,9 @@ skip:
+ 	new_socket(AUTH_SOCKET, sock);
+ 	if (ac > 0)
+ 		parent_alive_interval = 10;
++
+ 	idtab_init();
++	vartab_init();
+ 	ssh_signal(SIGPIPE, SIG_IGN);
+ 	ssh_signal(SIGINT, (d_flag | D_flag) ? cleanup_handler : SIG_IGN);
+ 	ssh_signal(SIGHUP, cleanup_handler);
+diff --git a/sshbuf.c b/sshbuf.c
+index 368ba7980..05ee243e3 100644
+--- a/sshbuf.c
++++ b/sshbuf.c
+@@ -28,6 +28,17 @@
+ #include "sshbuf.h"
+ #include "misc.h"
+ 
++#ifdef SSHBUF_DEBUG
++# define SSHBUF_TELL(what) do { \
++		printf("%s:%d %s: %s size %zu alloc %zu off %zu max %zu\n", \
++		    __FILE__, __LINE__, __func__, what, \
++		    buf->size, buf->alloc, buf->off, buf->max_size); \
++		fflush(stdout); \
++	} while (0)
++#else
++# define SSHBUF_TELL(what)
++#endif
++
+ static inline int
+ sshbuf_check_sanity(const struct sshbuf *buf)
+ {
+@@ -36,6 +47,7 @@ sshbuf_check_sanity(const struct sshbuf *buf)
+ 	    (!buf->readonly && buf->d != buf->cd) ||
+ 	    buf->refcount < 1 || buf->refcount > SSHBUF_REFS_MAX ||
+ 	    buf->cd == NULL ||
++	    (buf->dont_free && (buf->readonly || buf->parent != NULL)) ||
+ 	    buf->max_size > SSHBUF_SIZE_MAX ||
+ 	    buf->alloc > buf->max_size ||
+ 	    buf->size > buf->alloc ||
+@@ -133,6 +145,8 @@ sshbuf_fromb(struct sshbuf *buf)
+ void
+ sshbuf_free(struct sshbuf *buf)
+ {
++	int dont_free = 0;
++
+ 	if (buf == NULL)
+ 		return;
+ 	/*
+@@ -153,6 +167,8 @@ sshbuf_free(struct sshbuf *buf)
+ 	if (buf->refcount > 0)
+ 		return;
+ 
++	dont_free = buf->dont_free;
++
+ 	/*
+ 	 * If we are a child, the free our parent to decrement its reference
+ 	 * count and possibly free it.
+@@ -164,7 +180,21 @@ sshbuf_free(struct sshbuf *buf)
+ 		explicit_bzero(buf->d, buf->alloc);
+ 		free(buf->d);
+ 	}
+-	freezero(buf, sizeof(*buf));
++	if (!dont_free)
++		freezero(buf, sizeof(*buf));
++}
++
++void
++sshbuf_init(struct sshbuf *ret)
++{
++	explicit_bzero(ret, sizeof(*ret));
++	ret->alloc = SSHBUF_SIZE_INIT;
++	ret->max_size = SSHBUF_SIZE_MAX;
++	ret->readonly = 0;
++	ret->dont_free = 1;
++	ret->refcount = 1;
++	if ((ret->cd = ret->d = calloc(1, ret->alloc)) == NULL)
++		ret->alloc = 0;
+ }
+ 
+ void
+diff --git a/sshbuf.h b/sshbuf.h
+index 2ad0e61be..9ff2cfc1f 100644
+--- a/sshbuf.h
++++ b/sshbuf.h
+@@ -50,6 +50,13 @@ struct sshbuf {
+ 	struct sshbuf *parent;	/* If child, pointer to parent */
+ };
+ 
++/*
++ * NB. Please do not use sshbuf_init() in new code. Please use sshbuf_new()
++ * instead. sshbuf_init() is deprecated and will go away soon (it is
++ * only included to allow compat with buffer_* in OpenSSH)
++ */
++void sshbuf_init(struct sshbuf *buf);
++
+ /*
+  * Create a new sshbuf buffer.
+  * Returns pointer to buffer on success, or NULL on allocation failure.
+diff --git a/ssh-store.c b/ssh-store.c
+new file mode 100644
+index 000000000..a7ed30708
+--- /dev/null
++++ b/ssh-store.c
+@@ -0,0 +1,254 @@
++/* $OpenBSD: ssh-store.c,v 1.89 2006/08/03 03:34:42 deraadt Exp $ */
++/*
++ * ssh-store.c by Tim Adye <T.J.Adye@rl.ac.uk>, based on ssh-add.c.
++ *
++ * ssh-add.c:-
++ * Author: Tatu Ylonen <ylo@cs.hut.fi>
++ * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
++ *                    All rights reserved
++ * Adds an identity to the authentication server, or removes an identity.
++ *
++ * As far as I am concerned, the code I have written for this software
++ * can be used freely for any purpose.  Any derived versions of this
++ * software must be clearly marked as such, and if the derived work is
++ * incompatible with the protocol description in the RFC file, it must be
++ * called by a name other than "ssh" or "Secure Shell".
++ *
++ * SSH2 implementation,
++ * Copyright (c) 2000, 2001 Markus Friedl.  All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
++ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
++ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
++ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "includes.h"
++
++#include <sys/types.h>
++#include <sys/stat.h>
++
++#include <openssl/evp.h>
++
++#include <fcntl.h>
++#include <pwd.h>
++#include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#include "xmalloc.h"
++#include "ssh.h"
++#include "log.h"
++#include "sshkey.h"
++#include "sshbuf.h"
++#include "authfd.h"
++#include "authfile.h"
++#include "pathnames.h"
++#include "misc.h"
++#include "ssherr.h"
++#include "digest.h"
++
++/* argv0 */
++extern char *__progname;
++#define CHUNK 1024
++
++int
++set_from_file(int agent_fd, const char *var, u_int lvar, const char *file)
++{
++  FILE *f;
++  char *val = NULL;
++  u_int lval = 0;
++  size_t n;
++  int ret;
++
++  if (file && 0 != strcmp (file, "-")) {
++    f = fopen (file, "r");
++    if (!f) {
++      fprintf (stderr, "%s: could not open %s\n", __progname, file);
++      return 3;
++    }
++  } else {
++    f = stdin;
++  }
++  lval = 0;
++  do {
++    val= xreallocarray (val, lval+CHUNK, 1);
++    n = fread (val+lval, 1, CHUNK, f);
++    lval += n;
++  } while (n == CHUNK);
++  ret = ssh_set_variable (agent_fd, var, lvar, val, lval);
++  free (val);
++  return ret;
++}
++
++static int
++print_variable(int agent_fd, const char *var, u_int lvar)
++{
++  int ret = 0;
++  char *val;
++  u_int lval;
++
++  ret = ssh_get_variable(agent_fd, var, lvar, &val, &lval);
++  if (ret && val) {
++    fwrite (val, 1, lval, stdout);
++    free(val);
++  }
++  return ret;
++}
++
++static int
++list_variables(int agent_fd, const char* prefix, u_int lprefix, char full)
++{
++  char *var, *val;
++  u_int lvar, lval;
++  int ok, nvars = 0;
++  Buffer identities;
++  int howmany = 0;
++
++  for (ok = ssh_get_first_variable(agent_fd, prefix, lprefix, full, &var, &lvar, &val, &lval, &identities, &howmany);
++       ok;
++       ok = ssh_get_next_variable(agent_fd, full, &var, &lvar, &val, &lval, &identities, &howmany)) {
++    fwrite (var, 1, lvar, stdout);
++    if (full && val) {
++      putchar (' ');
++      fwrite (val, 1, lval, stdout);
++      if (!(lval > 0 && val[lval-1] == '\n')) putchar ('\n');
++    } else {
++      putchar ('\n');
++    }
++    free(var);
++    if (val) free(val);
++    nvars++;
++  }
++  return (nvars==0 ? 2 : 1);
++}
++
++static void
++usage(void)
++{
++  fprintf(stderr, "Usage: %s [options] variable [value]\n", __progname);
++  fprintf(stderr, "Options:\n");
++  fprintf(stderr, "  -s          Set variable (default if value specified).\n");
++  fprintf(stderr, "  -f          Set value from a file (specified as second argument, or else stdin).\n");
++  fprintf(stderr, "  -g          Get variable value (default if value not specified).\n");
++  fprintf(stderr, "  -l          List stored variables.\n");
++  fprintf(stderr, "  -L          List stored variables and their values (may include binary values)\n");
++  fprintf(stderr, "  -d          Delete stored value.\n");
++  fprintf(stderr, "  -D          Delete all stored values.\n");
++}
++
++int
++main(int argc, char **argv)
++{
++  extern int optind;
++  int agent_fd;
++  int r, ch, set = 0, get = 0, list = 0, delete = 0, ret = 0;
++
++  /* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
++  sanitise_stdfd();
++
++  __progname = ssh_get_progname(argv[0]);
++
++  /* First, get a connection to the authentication agent. */
++  switch (r = ssh_get_authentication_socket(&agent_fd)) {
++  case 0:
++    break;
++  case SSH_ERR_AGENT_NOT_PRESENT:
++    fprintf(stderr, "Could not open a connection to your "
++        "authentication agent.\n");
++    exit(2);
++  default:
++    fprintf(stderr, "Error connecting to agent: %s\n", ssh_err(r));
++    exit(2);
++  }
++  while ((ch = getopt(argc, argv, "hsfglLdD")) != -1) {
++    switch (ch) {
++    case 's':
++      set = 1;
++      break;
++    case 'f':
++      set = 2;
++      break;
++    case 'g':
++      get = 1;
++      break;
++    case 'l':
++      list = 1;
++      break;
++    case 'L':
++      list = 2;
++      break;
++    case 'd':
++      delete = 1;
++      break;
++    case 'D':
++      delete = 2;
++      break;
++    default:
++      usage();
++      ret = 2;
++      goto done;
++    }
++  }
++  argc -= optind;
++  argv += optind;
++
++  if ((set == 1 && argc != 2) ||
++      (set == 2 && (argc < 1 || argc > 2)) ||
++      ((get || delete == 1) && argc != 1) ||
++      ((list || delete == 2) && argc > 1) ||
++      ((!!set)+(!!get)+(!!list)+(!!delete) > 1)) {
++    fprintf (stderr, "%s: bad options\n", __progname);
++    goto done;
++  }
++  if (!(set || get || list || delete)) {
++    if      (argc == 1) get = 1;
++    else if (argc == 2) set = 1;
++    else {
++      usage();
++      goto done;
++    }
++  }
++
++  if        (set == 2) {
++    ret = set_from_file       (agent_fd, argv[0], strlen(argv[0]), (argc >= 2 ? argv[1] : NULL));
++  } else if (set) {
++    ret = ssh_set_variable    (agent_fd, argv[0], strlen(argv[0]), argv[1], strlen(argv[1]));
++  } else if (get) {
++    ret = print_variable      (agent_fd, argv[0], strlen(argv[0]));
++  } else if (list) {
++    if (argc >= 1) {
++      ret = list_variables      (agent_fd, argv[0], strlen(argv[0]), (list==2));
++    } else {
++      ret = list_variables      (agent_fd, "",      0,               (list==2));
++    }
++  } else if (delete) {
++    if (argc >= 1) {
++      ret = ssh_delete_variable (agent_fd, argv[0], strlen(argv[0]), (delete==2));
++    } else {
++      ret = ssh_delete_variable (agent_fd, "",      0,               (delete==2));
++    }
++  }
++  
++done:
++  ssh_close_authentication_socket(agent_fd);
++  return (ret == 0 ? 0 :
++          ret > 0 ? ret-1 : 10);
++}
