@@ -1,4 +1,4 @@
-Apply this patch to OpenSSH 9.5p1 and build as normal.
+Apply this patch to OpenSSH 8.7p1 and build as normal.
 This will make ssh-store as well as special versions of ssh-agent, scp, and sftp
 (these scp and sftp don't disable agent forwarding and don't use the new
 PermitLocalCommand option that is not supported by older versions of the ssh
@@ -82,6 +82,8 @@ persistent and specific for each user connecting with ssh-add/ssh-store.
 
 1.
   git clone https://github.com/PowerShell/openssh-portable.git
+  cd openssh-portable
+  git checkout v9.5.0.0
   wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-win32.patch
   patch < ssh-store7-win32.patch
 2. Start Visual Studio 2022

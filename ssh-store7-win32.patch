@@ -82,6 +82,8 @@ persistent and specific for each user connecting with ssh-add/ssh-store.
 
 1.
   git clone https://github.com/PowerShell/openssh-portable.git
+  cd openssh-portable
+  git checkout v9.5.0.0
   wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-win32.patch
   patch < ssh-store7-win32.patch
 2. Start Visual Studio 2022
