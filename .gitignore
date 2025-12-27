@@ -11,6 +11,7 @@ openssh.xml
 opensshd.init
 survey.sh
 **/*.o
+**/*.exe
 **/*.lo
 **/*.so
 **/*.out
@@ -23,6 +24,7 @@ sftp
 sftp-server
 ssh
 ssh-add
+ssh-store
 ssh-agent
 ssh-keygen
 ssh-keyscan
