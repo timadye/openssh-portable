@@ -1,0 +1,11 @@
+--- openssh.cygport.orig	2025-11-18 14:46:50.000000000 +0000
++++ openssh.cygport	2025-12-27 20:42:49.622349600 +0000
+@@ -16,6 +16,8 @@
+ 
+ inherit git
+ 
++PATCH_URI="patches/ssh-store7-cygwin.patch"
++
+ CYGCONF_ARGS="--libexecdir=/usr/sbin \
+ 	      --with-kerberos5=/usr \
+ 	      --with-libedit \

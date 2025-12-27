@@ -1,4 +1,4 @@
-Apply this patch to OpenSSH 8.7p1 and build as normal.
+Apply this patch to OpenSSH 10.2p1 and build as normal.
 This will make ssh-store as well as special versions of ssh-agent, scp, and sftp
 (these scp and sftp don't disable agent forwarding and don't use the new
 PermitLocalCommand option that is not supported by older versions of the ssh
@@ -143,7 +143,7 @@ bzip2 ../openssh-5.2p1-store-sun4x_510.tar
 
 ==============================================================================
 diff --git a/authfd.c b/authfd.c
-index 9f092f7cf..d4ccbab61 100644
+index 2bbe646e3..7225170c7 100644
 --- a/authfd.c
 +++ b/authfd.c
 @@ -52,6 +52,7 @@
@@ -154,7 +154,7 @@ index 9f092f7cf..d4ccbab61 100644
  #include "sshkey.h"
  #include "authfd.h"
  #include "cipher.h"
-@@ -650,3 +651,155 @@ ssh_remove_all_identities(int sock, int version)
+@@ -765,3 +766,155 @@ ssh_agent_bind_hostkey(int sock, const struct sshkey *key,
  	sshbuf_free(msg);
  	return r;
  }
@@ -311,16 +311,13 @@ index 9f092f7cf..d4ccbab61 100644
 +	return decode_reply(type);
 +}
 diff --git a/authfd.h b/authfd.h
-index 4fbf82f8c..c0d45a6f1 100644
+index 958d480de..d7da73ae9 100644
 --- a/authfd.h
 +++ b/authfd.h
-@@ -76,6 +76,22 @@ int	ssh_agent_sign(int sock, const struct sshkey *key,
- #define SSH2_AGENTC_ADD_ID_CONSTRAINED		25
- #define SSH_AGENTC_ADD_SMARTCARD_KEY_CONSTRAINED 26
+@@ -103,6 +103,19 @@ int	ssh_agent_bind_hostkey(int sock, const struct sshkey *key,
+ /* generic extension mechanism */
+ #define SSH_AGENTC_EXTENSION			27
  
-+/* generic extension mechanism */
-+#define SSH_AGENTC_EXTENSION			27
-+
 +/* ssh-store commands */
 +#define SSH_AGENTC_SET_VARIABLE			40
 +#define SSH_AGENT_VARIABLE_REPLACED		41
@@ -336,8 +333,8 @@ index 4fbf82f8c..c0d45a6f1 100644
 +
  #define	SSH_AGENT_CONSTRAIN_LIFETIME		1
  #define	SSH_AGENT_CONSTRAIN_CONFIRM		2
- #define	SSH_AGENT_CONSTRAIN_MAXSIGN		3
-@@ -91,4 +107,16 @@ int	ssh_agent_sign(int sock, const struct sshkey *key,
+ #define	SSH_AGENT_CONSTRAIN_EXTENSION		255
+@@ -117,4 +130,16 @@ int	ssh_agent_bind_hostkey(int sock, const struct sshkey *key,
  #define	SSH_AGENT_RSA_SHA2_256			0x02
  #define	SSH_AGENT_RSA_SHA2_512			0x04
  
@@ -844,32 +841,18 @@ index 000000000..56174394c
 +
 +#endif	/* BUFFER_H */
 +
-diff --git a/.gitignore b/.gitignore
-index 5e4ae5a60..b9fb662e2 100644
---- a/.gitignore
-+++ b/.gitignore
-@@ -24,6 +24,7 @@ sftp
- sftp-server
- ssh
- ssh-add
-+ssh-store
- ssh-agent
- ssh-keygen
- ssh-keyscan
 diff --git a/Makefile.in b/Makefile.in
-index b0293841a..8e4ade99b 100644
+index ba17a79f0..27c362a05 100644
 --- a/Makefile.in
 +++ b/Makefile.in
-@@ -67,7 +67,7 @@ MKDIR_P=@MKDIR_P@
+@@ -75,12 +75,14 @@ MKDIR_P=@MKDIR_P@
  
  .SUFFIXES: .lo
  
--TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) ssh-add$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT) ssh-sk-helper$(EXEEXT) ssh-keycat$(EXEEXT)
-+TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) ssh-add$(EXEEXT) ssh-store$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT) ssh-sk-helper$(EXEEXT) ssh-keycat$(EXEEXT)
+-TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) sshd-session$(EXEEXT) sshd-auth$(EXEEXT) ssh-add$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT) ssh-sk-helper$(EXEEXT) $(SK_STANDALONE)
++TARGETS=ssh$(EXEEXT) sshd$(EXEEXT) sshd-session$(EXEEXT) sshd-auth$(EXEEXT) ssh-add$(EXEEXT) ssh-store$(EXEEXT) ssh-keygen$(EXEEXT) ssh-keyscan${EXEEXT} ssh-keysign${EXEEXT} ssh-pkcs11-helper$(EXEEXT) ssh-agent$(EXEEXT) scp$(EXEEXT) sftp-server$(EXEEXT) sftp$(EXEEXT) ssh-sk-helper$(EXEEXT) $(SK_STANDALONE)
  
- XMSS_OBJS=\
- 	ssh-xmss.o \
-@@ -82,6 +82,8 @@ LIBOPENSSH_OBJS=\
+ LIBOPENSSH_OBJS=\
  	ssh_api.o \
  	ssherr.o \
  	sshbuf.o \
@@ -878,26 +861,26 @@ index b0293841a..8e4ade99b 100644
  	sshkey.o \
  	sshbuf-getput-basic.o \
  	sshbuf-misc.o \
-@@ -137,6 +139,8 @@ SCP_OBJS=	scp.o progressmeter.o $(SFTP_CLIENT_OBJS)
+@@ -156,6 +158,8 @@ SCP_OBJS=	scp.o progressmeter.o $(SFTP_CLIENT_OBJS)
  
- SSHADD_OBJS=	ssh-add.o $(SKOBJS)
+ SSHADD_OBJS=	ssh-add.o $(P11OBJS) $(SKOBJS)
  
-+SSHSTORE_OBJS=	ssh-store.o $(SKOBJS)
++SSHSTORE_OBJS=	ssh-store.o $(P11OBJS) $(SKOBJS)
 +
- SSHAGENT_OBJS=	ssh-agent.o ssh-pkcs11-client.o $(SKOBJS)
+ SSHAGENT_OBJS=	ssh-agent.o $(P11OBJS) $(SKOBJS)
  
- SSHKEYGEN_OBJS=	ssh-keygen.o sshsig.o $(SKOBJS)
-@@ -218,6 +222,9 @@ scp$(EXEEXT): $(LIBCOMPAT) libssh.a $(SCP_OBJS)
+ SSHKEYGEN_OBJS=	ssh-keygen.o sshsig.o ssh-pkcs11.o $(SKOBJS)
+@@ -237,6 +241,9 @@ scp$(EXEEXT): $(LIBCOMPAT) libssh.a $(SCP_OBJS)
  ssh-add$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHADD_OBJS)
- 	$(LD) -o $@ $(SSHADD_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
+ 	$(LD) -o $@ $(SSHADD_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS) $(CHANNELLIBS)
  
 +ssh-store$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHSTORE_OBJS)
-+	$(LD) -o $@ $(SSHSTORE_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
++	$(LD) -o $@ $(SSHSTORE_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS) $(CHANNELLIBS)
 +
  ssh-agent$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHAGENT_OBJS)
- 	$(LD) -o $@ $(SSHAGENT_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
+ 	$(LD) -o $@ $(SSHAGENT_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS) $(CHANNELLIBS)
  
-@@ -395,6 +402,7 @@ install-files:
+@@ -430,6 +437,7 @@ install-files:
  	$(INSTALL) -m 0755 $(STRIP_OPT) ssh$(EXEEXT) $(DESTDIR)$(bindir)/ssh$(EXEEXT)
  	$(INSTALL) -m 0755 $(STRIP_OPT) scp$(EXEEXT) $(DESTDIR)$(bindir)/scp$(EXEEXT)
  	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-add$(EXEEXT) $(DESTDIR)$(bindir)/ssh-add$(EXEEXT)
@@ -905,7 +888,7 @@ index b0293841a..8e4ade99b 100644
  	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-agent$(EXEEXT) $(DESTDIR)$(bindir)/ssh-agent$(EXEEXT)
  	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-keygen$(EXEEXT) $(DESTDIR)$(bindir)/ssh-keygen$(EXEEXT)
  	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-keyscan$(EXEEXT) $(DESTDIR)$(bindir)/ssh-keyscan$(EXEEXT)
-@@ -471,6 +479,7 @@ uninstall:
+@@ -507,6 +515,7 @@ uninstall:
  	-rm -f $(DESTDIR)$(bindir)/ssh$(EXEEXT)
  	-rm -f $(DESTDIR)$(bindir)/scp$(EXEEXT)
  	-rm -f $(DESTDIR)$(bindir)/ssh-add$(EXEEXT)
@@ -914,10 +897,10 @@ index b0293841a..8e4ade99b 100644
  	-rm -f $(DESTDIR)$(bindir)/ssh-keygen$(EXEEXT)
  	-rm -f $(DESTDIR)$(bindir)/ssh-keyscan$(EXEEXT)
 diff --git a/scp.c b/scp.c
-index e039350c6..759dfdf9a 100644
+index c5f573cc1..3796a9613 100644
 --- a/scp.c
 +++ b/scp.c
-@@ -474,7 +474,6 @@ main(int argc, char **argv)
+@@ -485,7 +485,6 @@ main(int argc, char **argv)
  	args.list = remote_remote_args.list = NULL;
  	addargs(&args, "%s", ssh_program);
  	addargs(&args, "-x");
@@ -926,30 +909,30 @@ index e039350c6..759dfdf9a 100644
  	addargs(&args, "-oRemoteCommand=none");
  	addargs(&args, "-oRequestTTY=no");
 diff --git a/sftp.c b/sftp.c
-index 69f84cdcf..82d2a42f8 100644
+index 3b505eea2..3090e739e 100644
 --- a/sftp.c
 +++ b/sftp.c
-@@ -2371,7 +2371,6 @@ main(int argc, char **argv)
+@@ -2455,7 +2455,6 @@ main(int argc, char **argv)
  	args.list = NULL;
  	addargs(&args, "%s", ssh_program);
  	addargs(&args, "-oForwardX11 no");
 -	addargs(&args, "-oPermitLocalCommand no");
  	addargs(&args, "-oClearAllForwardings yes");
+ 	addargs(&args, "-oControlMaster no");
  
- 	ll = SYSLOG_LEVEL_INFO;
 diff --git a/ssh-agent.c b/ssh-agent.c
-index 48a47d45a..b86cc0a77 100644
+index df241379c..d7ddb5ade 100644
 --- a/ssh-agent.c
 +++ b/ssh-agent.c
-@@ -79,6 +79,7 @@
+@@ -68,6 +68,7 @@
  #include "ssh.h"
  #include "ssh2.h"
  #include "sshbuf.h"
 +#include "buffer.h"
  #include "sshkey.h"
  #include "authfd.h"
- #include "compat.h"
-@@ -137,6 +138,21 @@ struct idtable {
+ #include "log.h"
+@@ -149,6 +150,21 @@ struct idtable {
  /* private key table */
  struct idtable *idtab;
  
@@ -971,8 +954,8 @@ index 48a47d45a..b86cc0a77 100644
  int max_fd = 0;
  
  /* pid of shell == parent of agent */
-@@ -191,6 +207,13 @@ idtab_init(void)
- 	idtab->nentries = 0;
+@@ -235,6 +251,13 @@ free_dest_constraint_hop(struct dest_constraint_hop *dch)
+ 	free(dch->key_is_ca);
  }
  
 +static void
@@ -983,10 +966,10 @@ index 48a47d45a..b86cc0a77 100644
 +}
 +
  static void
- free_identity(Identity *id)
+ free_dest_constraints(struct dest_constraint *dcs, size_t ndcs)
  {
-@@ -201,6 +224,14 @@ free_identity(Identity *id)
- 	free(id);
+@@ -560,6 +583,14 @@ identity_permitted(Identity *id, SocketEntry *e, char *user,
+ 	return 0;
  }
  
 +static void
@@ -997,13 +980,13 @@ index 48a47d45a..b86cc0a77 100644
 +	free(v);
 +}
 +
- /* return matching private key for given public key */
- static Identity *
- lookup_identity(struct sshkey *key)
-@@ -958,6 +989,185 @@ send:
+ static int
+ socket_is_remote(SocketEntry *e)
+ {
+@@ -1755,6 +1786,186 @@ process_ext_session_bind(SocketEntry *e)
+ 	sshbuf_free(sig);
+ 	return r == 0 ? 1 : 0;
  }
- #endif /* ENABLE_PKCS11 */
- 
 +/* return variable entry for given name */
 +static Variable *
 +lookup_variable(const char *var, u_int lvar)
@@ -1183,10 +1166,11 @@ index 48a47d45a..b86cc0a77 100644
 +	buffer_put_char(e->output, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
 +}
 +
- /*
-  * dispatch incoming message.
-  * returns 1 on success, 0 for incomplete messages or -1 on error.
-@@ -1009,6 +1219,10 @@ process_message(u_int socknum)
++/* dispatch incoming messages */
+ 
+ static void
+ process_extension(SocketEntry *e)
+@@ -1826,6 +2037,10 @@ process_message(u_int socknum)
  			/* send empty lists */
  			no_identities(e);
  			break;
@@ -1197,10 +1181,10 @@ index 48a47d45a..b86cc0a77 100644
  		default:
  			/* send a fail message for all other request types */
  			send_status(e, 0);
-@@ -1050,6 +1264,24 @@ process_message(u_int socknum)
- 		process_remove_smartcard_key(e);
+@@ -1870,6 +2085,24 @@ process_message(u_int socknum)
+ 	case SSH_AGENTC_EXTENSION:
+ 		process_extension(e);
  		break;
- #endif /* ENABLE_PKCS11 */
 +	case SSH_AGENTC_SET_VARIABLE:
 +		process_set_variable(e);
 +		break;
@@ -1222,7 +1206,7 @@ index 48a47d45a..b86cc0a77 100644
  	default:
  		/* Unknown message.  Respond with failure. */
  		error("Unknown message %d", type);
-@@ -1614,7 +1846,9 @@ skip:
+@@ -2527,7 +2760,9 @@ skip:
  	new_socket(AUTH_SOCKET, sock);
  	if (ac > 0)
  		parent_alive_interval = 10;
@@ -1233,36 +1217,37 @@ index 48a47d45a..b86cc0a77 100644
  	ssh_signal(SIGINT, (d_flag | D_flag) ? cleanup_handler : SIG_IGN);
  	ssh_signal(SIGHUP, cleanup_handler);
 diff --git a/sshbuf.c b/sshbuf.c
-index 368ba7980..05ee243e3 100644
+index 1b714e5f9..2ef39af09 100644
 --- a/sshbuf.c
 +++ b/sshbuf.c
-@@ -28,6 +28,17 @@
- #include "sshbuf.h"
- #include "misc.h"
+@@ -39,18 +39,6 @@
+ # define SSHBUF_TELL(what)
+ #endif
  
-+#ifdef SSHBUF_DEBUG
-+# define SSHBUF_TELL(what) do { \
-+		printf("%s:%d %s: %s size %zu alloc %zu off %zu max %zu\n", \
-+		    __FILE__, __LINE__, __func__, what, \
-+		    buf->size, buf->alloc, buf->off, buf->max_size); \
-+		fflush(stdout); \
-+	} while (0)
-+#else
-+# define SSHBUF_TELL(what)
-+#endif
-+
+-struct sshbuf {
+-	u_char *d;		/* Data */
+-	const u_char *cd;	/* Const data */
+-	size_t off;		/* First available byte is buf->d + buf->off */
+-	size_t size;		/* Last byte is buf->d + buf->size - 1 */
+-	size_t max_size;	/* Maximum size of buffer */
+-	size_t alloc;		/* Total bytes allocated to buf->d */
+-	int readonly;		/* Refers to external, const data */
+-	u_int refcount;		/* Tracks self and number of child buffers */
+-	struct sshbuf *parent;	/* If child, pointer to parent */
+-};
+-
  static inline int
  sshbuf_check_sanity(const struct sshbuf *buf)
  {
-@@ -36,6 +47,7 @@ sshbuf_check_sanity(const struct sshbuf *buf)
- 	    (!buf->readonly && buf->d != buf->cd) ||
+@@ -60,6 +48,7 @@ sshbuf_check_sanity(const struct sshbuf *buf)
+ 	    buf->parent == buf ||
  	    buf->refcount < 1 || buf->refcount > SSHBUF_REFS_MAX ||
  	    buf->cd == NULL ||
 +	    (buf->dont_free && (buf->readonly || buf->parent != NULL)) ||
  	    buf->max_size > SSHBUF_SIZE_MAX ||
  	    buf->alloc > buf->max_size ||
  	    buf->size > buf->alloc ||
-@@ -133,6 +145,8 @@ sshbuf_fromb(struct sshbuf *buf)
+@@ -160,6 +149,8 @@ sshbuf_fromb(struct sshbuf *buf)
  void
  sshbuf_free(struct sshbuf *buf)
  {
@@ -1271,19 +1256,19 @@ index 368ba7980..05ee243e3 100644
  	if (buf == NULL)
  		return;
  	/*
-@@ -153,6 +167,8 @@ sshbuf_free(struct sshbuf *buf)
+@@ -180,6 +171,8 @@ sshbuf_free(struct sshbuf *buf)
  	if (buf->refcount > 0)
  		return;
  
 +	dont_free = buf->dont_free;
 +
  	/*
- 	 * If we are a child, the free our parent to decrement its reference
+ 	 * If we are a child, then free our parent to decrement its reference
  	 * count and possibly free it.
-@@ -164,7 +180,21 @@ sshbuf_free(struct sshbuf *buf)
- 		explicit_bzero(buf->d, buf->alloc);
- 		free(buf->d);
- 	}
+@@ -189,7 +182,21 @@ sshbuf_free(struct sshbuf *buf)
+ 
+ 	if (!buf->readonly)
+ 		freezero(buf->d, buf->alloc);
 -	freezero(buf, sizeof(*buf));
 +	if (!dont_free)
 +		freezero(buf, sizeof(*buf));
@@ -1304,23 +1289,40 @@ index 368ba7980..05ee243e3 100644
  
  void
 diff --git a/sshbuf.h b/sshbuf.h
-index 2ad0e61be..9ff2cfc1f 100644
+index 0c82f120c..e0cd7f700 100644
 --- a/sshbuf.h
 +++ b/sshbuf.h
-@@ -50,6 +50,13 @@ struct sshbuf {
- 	struct sshbuf *parent;	/* If child, pointer to parent */
- };
+@@ -34,7 +34,29 @@
+ #define SSHBUF_MAX_BIGNUM	(16384 / 8)	/* Max bignum *bytes* */
+ #define SSHBUF_MAX_ECPOINT	((528 * 2 / 8) + 1) /* Max EC point *bytes* */
  
+-struct sshbuf;
++/*
++ * NB. do not depend on the internals of this. It will be made opaque
++ * one day.
++ */
++struct sshbuf {
++	u_char *d;		/* Data */
++	const u_char *cd;	/* Const data */
++	size_t off;		/* First available byte is buf->d + buf->off */
++	size_t size;		/* Last byte is buf->d + buf->size - 1 */
++	size_t max_size;	/* Maximum size of buffer */
++	size_t alloc;		/* Total bytes allocated to buf->d */
++	int readonly;		/* Refers to external, const data */
++	int dont_free;		/* Kludge to support sshbuf_init */
++	u_int refcount;		/* Tracks self and number of child buffers */
++	struct sshbuf *parent;	/* If child, pointer to parent */
++};
++
 +/*
 + * NB. Please do not use sshbuf_init() in new code. Please use sshbuf_new()
 + * instead. sshbuf_init() is deprecated and will go away soon (it is
 + * only included to allow compat with buffer_* in OpenSSH)
 + */
 +void sshbuf_init(struct sshbuf *buf);
-+
+ 
  /*
   * Create a new sshbuf buffer.
-  * Returns pointer to buffer on success, or NULL on allocation failure.
 diff --git a/ssh-store.c b/ssh-store.c
 new file mode 100644
 index 000000000..a7ed30708

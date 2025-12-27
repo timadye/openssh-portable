@@ -34,9 +34,9 @@ Alma9 build from source rpm
   rpmdev-setuptree
   rpm -ivh openssh-8.7p1-47.el9_7.alma.1.src.rpm
   wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-alma9-rpm.patch
-  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-8.7p1-47.el9_7.alma.1-store.spec.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-8.7p1-47.el9_7.alma.1-store7.spec.patch
   cp ssh-store7-alma9-rpm.patch ~/rpmbuild/SOURCES/
-  (cd; patch -p0) < openssh-8.7p1-47.el9_7.alma.1-store.spec.patch
+  (cd; patch -p0) < openssh-8.7p1-47.el9_7.alma.1-store7.spec.patch
 
   rpmbuild -ba ~/rpmbuild/SPECS/openssh.spec
 
@@ -67,10 +67,16 @@ only one that changes between CentOS7 and Alma9.
 Cygwin build
 ============
 
-1. Use setup.exe to install openssh src files.
+1. Use setup.exe to install openssh src files and build pre-requisites:
+  /setup-x86_64.exe -q -P openssh -s
+  /setup-x86_64.exe -q -P cygport,autoconf,automake,gcc-g++,make,libcrypt-devel,libedit-devel,libfido2-devel,libkrb5-devel,libssl-devel,zlib-devel
 2.
-  cd /usr/src/openssh-9.3p1-1.src
-  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-9.3p1-1.src.patch
+  cd /usr/src/openssh-10.2p1-1.src
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-cygwin.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-10.2p1-1-x86_64-store7.cygport.patch
+  patch < openssh-10.2p1-1-x86_64-store7.cygport.patch
+  mkdir patches
+  mv ssh-store7-cygwin.patch patches/
   cygport openssh.cygport all
 
 Windows build
