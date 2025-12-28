@@ -79,7 +79,6 @@
 #include "ssh.h"
 #include "ssh2.h"
 #include "sshbuf.h"
-#include "buffer.h"
 #include "sshkey.h"
 #include "authfd.h"
 #include "compat.h"
@@ -1002,105 +1001,132 @@ lookup_variable(const char *var, u_int lvar)
 	return (NULL);
 }
 
+static void
+send_return_code(SocketEntry *e, int code)
+{
+	int r;
+
+	if ((r = sshbuf_put_u32(e->output, 1)) != 0 ||
+	    (r = sshbuf_put_u8(e->output, code)) != 0)
+		fatal_fr(r, "compose");
+}
 
 static void
 process_set_variable(SocketEntry *e)
 {
 	u_int lvar, lval;
-	char *var, *val;
+	char *var = NULL, *val = NULL;
 	Variable *v;
-	int replace = 0;
+	int r, ret = SSH_AGENT_FAILURE;
 
-	var= buffer_get_string(e->request, &lvar);
-	val= buffer_get_string(e->request, &lval);
-
-	if ((v = lookup_variable(var, lvar))) {
-		debug("set '%.*s' = '%.*s' (replacing old value '%.*s')", lvar, var, lval, val, v->lval, v->val);
-		free(var);
-		free(v->val);
-		replace = 1;
-	} else {
-		debug("set '%.*s' = '%.*s'", lvar, var, lval, val);
-		v = xmalloc(sizeof(Variable));
-		v->var = var;
-		v->lvar = lvar;
-		TAILQ_INSERT_TAIL(&vartable.varlist, v, next);
-		vartable.nentries++;
+	if ((r = sshbuf_get_string(e->request, &var, &lvar)) != 0 ||
+	    (r = sshbuf_get_string(e->request, &val, &lval)) != 0)
+		error_fr(r, "parse");
+	else {
+		if ((v = lookup_variable(var, lvar))) {
+			debug("set '%.*s' = '%.*s' (replacing old value '%.*s')", lvar, var, lval, val, v->lval, v->val);
+			free(var);
+			free(v->val);
+			ret = SSH_AGENT_VARIABLE_REPLACED;
+		} else {
+			debug("set '%.*s' = '%.*s'", lvar, var, lval, val);
+			if ((v = xmalloc(sizeof(Variable))) == NULL)
+				fatal_f("xmalloc failed");
+			v->var = var;
+			v->lvar = lvar;
+			TAILQ_INSERT_TAIL(&vartable.varlist, v, next);
+			vartable.nentries++;
+			ret = SSH_AGENT_SUCCESS;
+		}
+		v->val = val;
+		v->lval = lval;
 	}
-	v->val = val;
-	v->lval = lval;
-	buffer_put_int(e->output, 1);
-	buffer_put_char(e->output, replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS);
+	send_return_code(e, SSH_AGENT_FAILURE);
 }
-
 
 static void
 process_get_variable(SocketEntry *e)
 {
 	u_int lvar;
-	char *var;
+	char *var = NULL;
 	Variable *v;
-	Buffer msg;
+	struct sshbuf *msg;
+	int r;
 
-	var= buffer_get_string(e->request, &lvar);
-
-	buffer_init(&msg);
+	if ((r = sshbuf_get_string(e->request, &var, &lvar)) != 0) {
+		error_fr(r, "parse");
+		send_return_code(e, SSH_AGENT_FAILURE);
+		return;
+	}
 	if ((v = lookup_variable(var, lvar))) {
 		debug("get '%.*s' -> '%.*s'", lvar, var, v->lval, v->val);
-		buffer_put_char(&msg, SSH_AGENT_GET_VARIABLE_ANSWER);
-		buffer_put_string(&msg, v->val, v->lval);
+		if ((msg = sshbuf_new()) == NULL)
+			fatal_f("sshbuf_new failed");
+		if ((r = sshbuf_put_u8(msg, SSH_AGENT_GET_VARIABLE_ANSWER)) != 0 ||
+				(r = sshbuf_put_string(msg, v->val, v->lval)) != 0 ||
+				(r = sshbuf_put_u32(e->output, sshbuf_len(msg))) != 0 ||
+				(r = sshbuf_putb(e->output, msg)) != 0)
+			fatal_fr(r, "compose");
+		sshbuf_free(msg);
 	} else {
 		debug("variable '%.*s' not found", lvar, var);
-		buffer_put_char(&msg, SSH_AGENT_NO_VARIABLE);
+		send_return_code(e, SSH_AGENT_NO_VARIABLE);
 	}
 	free(var);
-	buffer_put_int(e->output, buffer_len(&msg));
-	buffer_append(e->output, buffer_ptr(&msg), buffer_len(&msg));
-	buffer_free(&msg);
 }
 
 /* send list of variables */
 static void
 process_list_variables(SocketEntry *e, char full)
 {
-	Buffer msg, msg2;
-	char *prefix;
+	struct sshbuf *msg, *msg2;
+	int r;
+	char *prefix = NULL;
 	u_int lprefix, nret = 0;
 	Variable *v;
 
-	prefix= buffer_get_string(e->request, &lprefix);
-	buffer_init(&msg);
+	if ((r = sshbuf_get_string(e->request, &prefix, &lprefix)) != 0)
+		error_fr(r, "parse");
+		send_return_code(e, SSH_AGENT_FAILURE);
+		return;
+	}
+	if ((msg = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new failed");
 	TAILQ_FOREACH(v, &vartable.varlist, next) {
 		if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
-			buffer_put_string(&msg, v->var, v->lvar);
-			if (full) buffer_put_string(&msg, v->val, v->lval);
+			if ((r = sshbuf_put_string(msg, v->var, v->lvar)) != 0 ||
+					(r = full ? sshbuf_put_string(msg, v->val, v->lval) : 0) != 0)
+				fatal_fr(r, "compose");
 			nret++;
 		}
 	}
   free(prefix);
-	buffer_init(&msg2);
-	buffer_put_char(&msg2, full ?
-	    SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
-	buffer_put_int(&msg2, nret);
-	buffer_put_int(e->output, buffer_len(&msg)+buffer_len(&msg2));
-	buffer_append(e->output, buffer_ptr(&msg2), buffer_len(&msg2));
-	buffer_append(e->output, buffer_ptr(&msg), buffer_len(&msg));
-	buffer_free(&msg);
+	if ((msg2 = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new failed");
+	if ((r = sshbuf_put_u8(msg2, full ? SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER)) != 0 ||
+	    (r = sshbuf_put_u32(msg2, nret)) != 0 ||
+	    (r = sshbuf_put_u32(e->output, sshbuf_len(msg)+sshbuf_len(msg2))) != 0 ||
+	    (r = sshbuf_putb(e->output, msg2)) != 0 ||
+	    (r = sshbuf_putb(e->output, msg)) != 0)
+		fatal_fr(r, "compose");
+	sshbuf_free(msg2);
+	sshbuf_free(msg);
 }
 
 static void
 no_variables(SocketEntry *e, u_int type)
 {
-	Buffer msg;
+	struct sshbuf *msg;
+	int r;
 
-	buffer_init(&msg);
-	buffer_put_char(&msg,
-	    (type == SSH_AGENTC_LIST_VARIABLES) ?
-	    SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER);
-	buffer_put_int(&msg, 0);
-	buffer_put_int(e->output, buffer_len(&msg));
-	buffer_append(e->output, buffer_ptr(&msg), buffer_len(&msg));
-	buffer_free(&msg);
+	if ((msg = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new failed");
+	if ((r = sshbuf_put_u8(msg, (type == SSH_AGENTC_LIST_VARIABLES) ? SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER)) != 0 ||
+	    (r = sshbuf_put_u32(&msg, 0)) != 0 ||
+	    (r = sshbuf_put_u32(e->output, sshbuf_len(msg))) != 0 ||
+	    (r = sshbuf_put(e->output, sshbuf_ptr(msg), sshbuf_len(msg))) != 0) ||
+		fatal_fr(r, "compose");
+	sshbuf_free(msg);
 }
 
 /* shared */
@@ -1109,42 +1135,42 @@ process_remove_variable(SocketEntry *e)
 {
 	int success = 0;
 	u_int lvar;
-	char *var;
+	char *var = NULL;
 	Variable *v;
+	int r, ret;
 
-	var= buffer_get_string(e->request, &lvar);
-
+	if ((r = sshbuf_get_string(e->request, &var, &lvar)) != 0) {
+		error_fr(r, "parse");
+		send_return_code(e, SSH_AGENT_FAILURE);
+		return;
+	}
 	if ((v = lookup_variable(var, lvar))) {
-		/*
-		 * We have this key.  Free the old key.  Since we
-		 * don't want to leave empty slots in the middle of
-		 * the array, we actually free the key there and move
-		 * all the entries between the empty slot and the end
-		 * of the array.
-		 */
 		if (vartable.nentries < 1)
-			fatal("process_remove_identity: "
-				    "internal error: vartable.nentries %d",
-				    vartable.nentries);
+			fatal_f("internal error: vartable.nentries %d", vartable.nentries);
 		TAILQ_REMOVE(&vartable.varlist, v, next);
 		free_variable (v);
 		vartable.nentries--;
-		success = 1;
-	}
+		ret = SSH_AGENT_SUCCESS;
+	} else
+		ret = SSH_AGENT_NO_VARIABLE;
 	free (var);
-	buffer_put_int(e->output, 1);
-	buffer_put_char(e->output,
-	    success ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
+	send_return_code(e, ret);
 }
 
 static void
 process_remove_all_variables(SocketEntry *e)
 {
-	char *prefix;
+	char *prefix = NULL;
 	u_int lprefix, ndel = 0;
 	Variable *v, *last = NULL;
+	int r;
 
-	prefix= buffer_get_string(e->request, &lprefix);
+	if ((r = sshbuf_get_string(e->request, &prefix, &lprefix)) != 0)
+		error_fr(r, "parse");
+		send_return_code(e, SSH_AGENT_FAILURE);
+		return;
+	}
+	r = sshbuf_get_string(e->request, &prefix, &lprefix);
 	TAILQ_FOREACH(v, &vartable.varlist, next) {
 		if (last) {   /* don't remove variable until we've moved past it */
 			TAILQ_REMOVE(&vartable.varlist, last, next);
@@ -1164,8 +1190,7 @@ process_remove_all_variables(SocketEntry *e)
 	free(prefix);
 
 	/* Send success. */
-	buffer_put_int(e->output, 1);
-	buffer_put_char(e->output, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
+	send_return_code(e, ndel ? SSH_AGENT_SUCCESS : SSH_AGENT_NO_VARIABLE);
 }
 
 /*
