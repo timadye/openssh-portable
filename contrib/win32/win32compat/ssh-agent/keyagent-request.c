@@ -1104,8 +1104,8 @@ process_set_variable(struct sshbuf* request, struct sshbuf* response, struct age
 		memset(&sa, 0, sizeof(SECURITY_ATTRIBUTES));
 		sa.nLength = sizeof(sa);
 		if ((stage++, ConvertStringSecurityDescriptorToSecurityDescriptorW(REG_KEY_SDDL, SDDL_REVISION_1, &sa.lpSecurityDescriptor, &sa.nLength)) &&
-				(stage++, get_user_root(con, &user_root) == 0) &&
-				(stage++, RegCreateKeyExW(user_root, SSH_VARIABLES_ROOT, 0, 0, 0, KEY_WRITE | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &sa, &reg, NULL) == ERROR_SUCCESS)) {
+		    (stage++, get_user_root(con, &user_root) == 0) &&
+		    (stage++, RegCreateKeyExW(user_root, SSH_VARIABLES_ROOT, 0, 0, 0, KEY_WRITE | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &sa, &reg, NULL) == ERROR_SUCCESS)) {
 			replace = (RegQueryValueExA(reg, svar, 0, &oldtype, NULL, &loldval) == ERROR_SUCCESS && oldtype == REG_BINARY);
 			if ((stage++, RegSetValueExA(reg, svar, 0, REG_BINARY, val, lval) == ERROR_SUCCESS)) {
 				if (replace) {
@@ -1130,7 +1130,8 @@ process_set_variable(struct sshbuf* request, struct sshbuf* response, struct age
 	if (var) free(var);
 
 	buffer_put_char(response, !success ? SSH_AGENT_FAILURE :
-														replace ? SSH_AGENT_VARIABLE_REPLACED : SSH_AGENT_SUCCESS);
+	                          replace  ? SSH_AGENT_VARIABLE_REPLACED :
+	                                     SSH_AGENT_SUCCESS);
 	return 0;
 }
 
@@ -1152,11 +1153,11 @@ process_get_variable(struct sshbuf* request, struct sshbuf* response, struct age
 		memcpy(svar, var, lvar);
 		svar[lvar] = '\0';
 		if ((stage++, get_user_root(con, &user_root) == 0) &&
-				(stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &reg) == ERROR_SUCCESS) &&
-				(stage++, RegQueryValueExA(reg, svar, 0, &type, NULL, &lval) == ERROR_SUCCESS) &&
-				(stage++, (type == REG_BINARY)) &&
-				(stage++, (val = malloc(lval)) != NULL) &&
-				(stage++, RegQueryValueExA(reg, svar, 0, NULL, val, &lval) == ERROR_SUCCESS)) {
+		    (stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &reg) == ERROR_SUCCESS) &&
+		    (stage++, RegQueryValueExA(reg, svar, 0, &type, NULL, &lval) == ERROR_SUCCESS) &&
+		    (stage++, (type == REG_BINARY)) &&
+		    (stage++, (val = malloc(lval)) != NULL) &&
+		    (stage++, RegQueryValueExA(reg, svar, 0, NULL, val, &lval) == ERROR_SUCCESS)) {
 			debug("get '%.*s' -> '%.*s'", lvar, var, lval, val);
 			buffer_put_char(response, SSH_AGENT_GET_VARIABLE_ANSWER);
 			buffer_put_string(response, val, lval);
@@ -1195,8 +1196,8 @@ process_list_variables(struct sshbuf* request, struct sshbuf* response, struct a
 
 	if ((stage++, get_user_root(con, &user_root) == 0) &&
 	    (stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &reg) == 0) &&
-			(stage++, RegQueryInfoKeyW(reg, NULL, NULL, NULL, NULL, NULL, NULL, &nvar, &maxvar, &maxval, NULL, NULL) == ERROR_SUCCESS) &&
-			(stage++, nvar > 0)) {
+	    (stage++, RegQueryInfoKeyW(reg, NULL, NULL, NULL, NULL, NULL, NULL, &nvar, &maxvar, &maxval, NULL, NULL) == ERROR_SUCCESS) &&
+	    (stage++, nvar > 0)) {
 		maxvar++;
 		maxval++;
 		var = malloc(maxvar);
@@ -1258,9 +1259,9 @@ process_remove_variable(struct sshbuf* request, struct sshbuf* response, struct 
 		memcpy(svar, var, lvar);
 		svar[lvar] = '\0';
 		if ((stage++, get_user_root(con, &user_root) == 0) &&
-				(stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_64KEY, &reg) == ERROR_SUCCESS) &&
-				(stage++, RegQueryValueExA(reg, svar, 0, &type, NULL, &lval) == ERROR_SUCCESS) &&
-				(stage++, (type == REG_BINARY))) {
+		    (stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_64KEY, &reg) == ERROR_SUCCESS) &&
+		    (stage++, RegQueryValueExA(reg, svar, 0, &type, NULL, &lval) == ERROR_SUCCESS) &&
+		    (stage++, (type == REG_BINARY))) {
 			if (RegDeleteValueA (reg, svar) == ERROR_SUCCESS) {
 				debug("deleted variable '%.*s' (length %d)", lvar, var, lval);
 				success = 1;
@@ -1295,8 +1296,8 @@ process_remove_all_variables(struct sshbuf* request, struct sshbuf* response, st
 	HKEY reg = 0, user_root = 0;
 
 	if ((stage++, get_user_root(con, &user_root) == 0) &&
-			(stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, DELETE | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_64KEY, &reg) == 0) &&
-			(stage++, RegQueryInfoKeyW(reg, NULL, NULL, NULL, NULL, NULL, NULL, &nvar, &maxvar, NULL, NULL, NULL) == ERROR_SUCCESS)) {
+	    (stage++, RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, DELETE | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_64KEY, &reg) == 0) &&
+	    (stage++, RegQueryInfoKeyW(reg, NULL, NULL, NULL, NULL, NULL, NULL, &nvar, &maxvar, NULL, NULL, NULL) == ERROR_SUCCESS)) {
 		prefix= buffer_get_string(request, &lprefix);
 		if (!prefix || lprefix == 0) {
 			debug("delete all %d variables", nvar);
