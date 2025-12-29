@@ -157,8 +157,8 @@ typedef struct variable {
 	TAILQ_ENTRY(variable) next;
 	char *var;
 	char *val;
-	u_int lvar;
-	u_int lval;
+	size_t lvar;
+	size_t lval;
 } Variable;
 
 typedef struct {
@@ -1615,7 +1615,7 @@ process_ext_session_bind(SocketEntry *e)
 
 /* return variable entry for given name */
 static Variable *
-lookup_variable(const char *var, u_int lvar)
+lookup_variable(const char *var, size_t lvar)
 {
 	Variable *v;
 
@@ -1639,22 +1639,22 @@ send_return_code(SocketEntry *e, int code)
 static void
 process_set_variable(SocketEntry *e)
 {
-	u_int lvar, lval;
+	size_t lvar, lval;
 	char *var = NULL, *val = NULL;
 	Variable *v;
 	int r, ret = SSH_AGENT_FAILURE;
 
-	if ((r = sshbuf_get_string(e->request, &var, &lvar)) != 0 ||
-	    (r = sshbuf_get_string(e->request, &val, &lval)) != 0)
+	if ((r = sshbuf_get_string(e->request, (u_char**)&var, &lvar)) != 0 ||
+	    (r = sshbuf_get_string(e->request, (u_char**)&val, &lval)) != 0)
 		error_fr(r, "parse");
 	else {
 		if ((v = lookup_variable(var, lvar))) {
-			debug("set '%.*s' = '%.*s' (replacing old value '%.*s')", lvar, var, lval, val, v->lval, v->val);
+			debug("set '%.*s' = '%.*s' (replacing old value '%.*s')", (int)lvar, var, (int)lval, val, (int)v->lval, v->val);
 			free(var);
 			free(v->val);
 			ret = SSH_AGENT_VARIABLE_REPLACED;
 		} else {
-			debug("set '%.*s' = '%.*s'", lvar, var, lval, val);
+			debug("set '%.*s' = '%.*s'", (int)lvar, var, (int)lval, val);
 			if ((v = xmalloc(sizeof(Variable))) == NULL)
 				fatal_f("xmalloc failed");
 			v->var = var;
@@ -1666,25 +1666,25 @@ process_set_variable(SocketEntry *e)
 		v->val = val;
 		v->lval = lval;
 	}
-	send_return_code(e, SSH_AGENT_FAILURE);
+	send_return_code(e, ret);
 }
 
 static void
 process_get_variable(SocketEntry *e)
 {
-	u_int lvar;
+	size_t lvar;
 	char *var = NULL;
 	Variable *v;
 	struct sshbuf *msg;
 	int r;
 
-	if ((r = sshbuf_get_string(e->request, &var, &lvar)) != 0) {
+	if ((r = sshbuf_get_string(e->request, (u_char**)&var, &lvar)) != 0) {
 		error_fr(r, "parse");
 		send_return_code(e, SSH_AGENT_FAILURE);
 		return;
 	}
 	if ((v = lookup_variable(var, lvar))) {
-		debug("get '%.*s' -> '%.*s'", lvar, var, v->lval, v->val);
+		debug("get '%.*s' -> '%.*s'", (int)lvar, var, (int)v->lval, v->val);
 		if ((msg = sshbuf_new()) == NULL)
 			fatal_f("sshbuf_new failed");
 		if ((r = sshbuf_put_u8(msg, SSH_AGENT_GET_VARIABLE_ANSWER)) != 0 ||
@@ -1694,7 +1694,7 @@ process_get_variable(SocketEntry *e)
 			fatal_fr(r, "compose");
 		sshbuf_free(msg);
 	} else {
-		debug("variable '%.*s' not found", lvar, var);
+		debug("variable '%.*s' not found", (int)lvar, var);
 		send_return_code(e, SSH_AGENT_NO_VARIABLE);
 	}
 	free(var);
@@ -1707,10 +1707,10 @@ process_list_variables(SocketEntry *e, char full)
 	struct sshbuf *msg, *msg2;
 	int r;
 	char *prefix = NULL;
-	u_int lprefix, nret = 0;
+	size_t lprefix, nret = 0;
 	Variable *v;
 
-	if ((r = sshbuf_get_string(e->request, &prefix, &lprefix)) != 0) {
+	if ((r = sshbuf_get_string(e->request, (u_char**)&prefix, &lprefix)) != 0) {
 		error_fr(r, "parse");
 		send_return_code(e, SSH_AGENT_FAILURE);
 		return;
@@ -1739,7 +1739,7 @@ process_list_variables(SocketEntry *e, char full)
 }
 
 static void
-no_variables(SocketEntry *e, u_int type)
+no_variables(SocketEntry *e, size_t type)
 {
 	struct sshbuf *msg;
 	int r;
@@ -1747,7 +1747,7 @@ no_variables(SocketEntry *e, u_int type)
 	if ((msg = sshbuf_new()) == NULL)
 		fatal_f("sshbuf_new failed");
 	if ((r = sshbuf_put_u8(msg, (type == SSH_AGENTC_LIST_VARIABLES) ? SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER)) != 0 ||
-	    (r = sshbuf_put_u32(&msg, 0)) != 0 ||
+	    (r = sshbuf_put_u32(msg, 0)) != 0 ||
 	    (r = sshbuf_put_u32(e->output, sshbuf_len(msg))) != 0 ||
 	    (r = sshbuf_put(e->output, sshbuf_ptr(msg), sshbuf_len(msg))) != 0)
 		fatal_fr(r, "compose");
@@ -1758,13 +1758,12 @@ no_variables(SocketEntry *e, u_int type)
 static void
 process_remove_variable(SocketEntry *e)
 {
-	int success = 0;
-	u_int lvar;
+	size_t lvar;
 	char *var = NULL;
 	Variable *v;
 	int r, ret;
 
-	if ((r = sshbuf_get_string(e->request, &var, &lvar)) != 0) {
+	if ((r = sshbuf_get_string(e->request, (u_char**)&var, &lvar)) != 0) {
 		error_fr(r, "parse");
 		send_return_code(e, SSH_AGENT_FAILURE);
 		return;
@@ -1786,11 +1785,11 @@ static void
 process_remove_all_variables(SocketEntry *e)
 {
 	char *prefix = NULL;
-	u_int lprefix, ndel = 0;
+	size_t lprefix, ndel = 0;
 	Variable *v, *last = NULL;
 	int r;
 
-	if ((r = sshbuf_get_string(e->request, &prefix, &lprefix)) != 0) {
+	if ((r = sshbuf_get_string(e->request, (u_char**)&prefix, &lprefix)) != 0) {
 		error_fr(r, "parse");
 		send_return_code(e, SSH_AGENT_FAILURE);
 		return;
