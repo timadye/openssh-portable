@@ -101,9 +101,9 @@ set_from_file(int agent_fd, const char *var, size_t lvar, const char *file)
 static int
 print_variable(int agent_fd, const char *var, size_t lvar)
 {
-	int ret = 0;
-	char *val;
-	size_t lval;
+	int ret;
+	char *val = NULL;
+	size_t lval = 0;
 
 	ret = ssh_get_variable(agent_fd, var, lvar, &val, &lval);
 	if (ret && val) {
@@ -116,15 +116,15 @@ print_variable(int agent_fd, const char *var, size_t lvar)
 static int
 list_variables(int agent_fd, const char* prefix, size_t lprefix, char full)
 {
-	char *var, *val;
-	size_t lvar, lval;
-	int ok, nvars = 0;
+	char *var = NULL, *val = NULL;
+	size_t lvar = 0, lval = 0;
+	int r, nvars = 0;
 	struct sshbuf *buf = NULL;
-	int howmany = 0;
+	u_int32_t howmany = 0;
 
-	for (ok = ssh_get_first_variable(agent_fd, prefix, lprefix, full, &var, &lvar, &val, &lval, &buf, &howmany);
-	     ok;
-	     ok = ssh_get_next_variable(agent_fd, full, &var, &lvar, &val, &lval, &buf, &howmany)) {
+	for (r = ssh_get_first_variable(agent_fd, prefix, lprefix, full, &var, &lvar, &val, &lval, &buf, &howmany);
+	     r == 0;
+	     r = ssh_get_next_variable(agent_fd, full, &var, &lvar, &val, &lval, &buf, &howmany)) {
 		fwrite (var, 1, lvar, stdout);
 		if (full && val) {
 			putchar (' ');
@@ -134,10 +134,13 @@ list_variables(int agent_fd, const char* prefix, size_t lprefix, char full)
 			putchar ('\n');
 		}
 		free(var);
+		var = NULL;
 		if (val) free(val);
+		val = NULL;
 		nvars++;
 	}
-	return (nvars==0 ? 2 : 1);
+	if (r != SSH_AGENT_NO_VARIABLE) return r;
+	return (nvars==0 ? 1 : 0);
 }
 
 static void
@@ -249,6 +252,5 @@ main(int argc, char **argv)
 	
 done:
 	ssh_close_authentication_socket(agent_fd);
-	return (ret == 0 ? 0 :
-	        ret > 0 ? ret-1 : 10);
+	return (ret >= 0 ? ret : 10);
 }
