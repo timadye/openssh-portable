@@ -70,11 +70,11 @@ extern char *__progname;
 #define CHUNK 1024
 
 int
-set_from_file(int agent_fd, const char *var, u_int lvar, const char *file)
+set_from_file(int agent_fd, const char *var, size_t lvar, const char *file)
 {
 	FILE *f;
 	char *val = NULL;
-	u_int lval = 0;
+	size_t lval = 0;
 	size_t n;
 	int ret;
 
@@ -99,11 +99,11 @@ set_from_file(int agent_fd, const char *var, u_int lvar, const char *file)
 }
 
 static int
-print_variable(int agent_fd, const char *var, u_int lvar)
+print_variable(int agent_fd, const char *var, size_t lvar)
 {
 	int ret = 0;
 	char *val;
-	u_int lval;
+	size_t lval;
 
 	ret = ssh_get_variable(agent_fd, var, lvar, &val, &lval);
 	if (ret && val) {
@@ -114,17 +114,17 @@ print_variable(int agent_fd, const char *var, u_int lvar)
 }
 
 static int
-list_variables(int agent_fd, const char* prefix, u_int lprefix, char full)
+list_variables(int agent_fd, const char* prefix, size_t lprefix, char full)
 {
 	char *var, *val;
-	u_int lvar, lval;
+	size_t lvar, lval;
 	int ok, nvars = 0;
-	struct sshbuf *identities = NULL;
+	struct sshbuf *buf = NULL;
 	int howmany = 0;
 
-	for (ok = ssh_get_first_variable(agent_fd, prefix, lprefix, full, &var, &lvar, &val, &lval, &identities, &howmany);
+	for (ok = ssh_get_first_variable(agent_fd, prefix, lprefix, full, &var, &lvar, &val, &lval, &buf, &howmany);
 	     ok;
-	     ok = ssh_get_next_variable(agent_fd, full, &var, &lvar, &val, &lval, &identities, &howmany)) {
+	     ok = ssh_get_next_variable(agent_fd, full, &var, &lvar, &val, &lval, &buf, &howmany)) {
 		fwrite (var, 1, lvar, stdout);
 		if (full && val) {
 			putchar (' ');

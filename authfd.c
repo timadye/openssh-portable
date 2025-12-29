@@ -652,7 +652,7 @@ ssh_remove_all_identities(int sock, int version)
 }
 
 int
-ssh_set_variable(int sock, const char *var, u_int lvar, const char *val, u_int lval)
+ssh_set_variable(int sock, const char *var, size_t lvar, const char *val, size_t lval)
 {
 	struct sshbuf *msg;
 	int r;
@@ -673,7 +673,7 @@ ssh_set_variable(int sock, const char *var, u_int lvar, const char *val, u_int l
 
 
 int
-ssh_get_variable(int sock, const char *var, u_int lvar, char **valp, u_int *lvalp)
+ssh_get_variable(int sock, const char *var, size_t lvar, char **valp, size_t *lvalp)
 {
 	struct sshbuf *msg;
 	int r;
@@ -691,7 +691,7 @@ ssh_get_variable(int sock, const char *var, u_int lvar, char **valp, u_int *lval
 		if (agent_failed(type)) {
 			logit("Agent could not get variable.");
 		} else if (type == SSH_AGENT_GET_VARIABLE_ANSWER) {
-			r = sshbuf_get_string(msg, valp, lvalp);
+			r = sshbuf_get_string(msg, (u_char**)valp, lvalp);
 			ret = 1;
 		} else if (type == SSH_AGENT_NO_VARIABLE) {
 			ret = 2;
@@ -709,14 +709,14 @@ ssh_get_variable(int sock, const char *var, u_int lvar, char **valp, u_int *lval
  */
 
 static int
-ssh_get_num_variables(int sock, const char *prefix, u_int lprefix, char full, struct sshbuf **identities)
+ssh_get_num_variables(int sock, const char *prefix, size_t lprefix, char full, struct sshbuf **buf)
 {
 	struct sshbuf *request = NULL;
 	int r;
 	u_char type;
 	u_int32_t howmany = 0;
 
-	*identities = NULL;
+	*buf = NULL;
 	if (!prefix) {
 		prefix = "";
 		lprefix = 0;
@@ -725,24 +725,24 @@ ssh_get_num_variables(int sock, const char *prefix, u_int lprefix, char full, st
 		r = SSH_ERR_ALLOC_FAIL;
 	else if ((r = sshbuf_put_u8(request, full ? SSH_AGENTC_LIST_VARIABLES : SSH_AGENTC_LIST_VARIABLE_NAMES)) == 0 &&
 	         (r = sshbuf_put_string(request, prefix, lprefix)) == 0) {
-		if ((*identities = sshbuf_new()) == NULL)
+		if ((*buf = sshbuf_new()) == NULL)
 			r = SSH_ERR_ALLOC_FAIL;
-		else if ((r = ssh_request_reply(sock, request, identities)) == 0 &&
-		         (r = sshbuf_get_u8(identities, &type)) == 0) {
+		else if ((r = ssh_request_reply(sock, request, *buf)) == 0 &&
+		         (r = sshbuf_get_u8(*buf, &type)) == 0) {
 			/* Get message type, and verify that we got a proper answer. */
 			if (type != (full ? SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER)) {
 				fatal("Bad authentication reply message type: %d", type);
 			} else {
 				/* Get the number of entries in the response and check it for sanity. */
-				if ((r = sshbuf_get_u32(identities, &howmany)) == 0) {
-					if ((u_int)howmany > 1024)
+				if ((r = sshbuf_get_u32(*buf, &howmany)) == 0) {
+					if (howmany > 1024)
 						fatal("Too many variables in agent's reply: %d", howmany);
 				}
 			}
 		}
 	}
 
-	if (*identities) sshbuf_free(*identities);
+	if (*buf) sshbuf_free(*buf);
 	sshbuf_free(request);
 	if (r != 0)
 		fatal("Error %d listing variables", r);
@@ -750,20 +750,20 @@ ssh_get_num_variables(int sock, const char *prefix, u_int lprefix, char full, st
 }
 
 int
-ssh_get_first_variable(int sock, const char *prefix, u_int lprefix, char full,
-                       char **varp, u_int *lvarp, char **valp, u_int *lvalp,
-                       struct sshbuf **identities, int *howmany)
+ssh_get_first_variable(int sock, const char *prefix, size_t lprefix, char full,
+                       char **varp, size_t *lvarp, char **valp, size_t *lvalp,
+                       struct sshbuf **buf, int *howmany)
 {
-	/* get number of identities and return the first entry (if any). */
-	if ((*howmany = ssh_get_num_variables(sock, prefix, lprefix, full, identities)) > 0)
-		return ssh_get_next_variable(sock, full, varp, lvarp, valp, lvalp, identities, howmany);
+	/* get number of variables and return the first entry (if any). */
+	if ((*howmany = ssh_get_num_variables(sock, prefix, lprefix, full, buf)) > 0)
+		return ssh_get_next_variable(sock, full, varp, lvarp, valp, lvalp, buf, howmany);
 	return 0;
 }
 
 int
 ssh_get_next_variable(int sock, char full,
-                      char **varp, u_int *lvarp, char **valp, u_int *lvalp,
-                      struct sshbuf **identities, int *howmany)
+                      char **varp, size_t *lvarp, char **valp, size_t *lvalp,
+                      struct sshbuf **buf, int *howmany)
 {
 	int r;
 
@@ -776,9 +776,9 @@ ssh_get_next_variable(int sock, char full,
 	/*
 	 * Get the next entry from the packet.
 	 */
-	if ((r = sshbuf_get_string(identities, varp, lvarp)) == 0 &&
+	if ((r = sshbuf_get_string(*buf, (u_char**)varp, lvarp)) == 0 &&
 	    full &&
-	    (r = sshbuf_get_string(identities, valp, lvalp)) == 0) {
+	    (r = sshbuf_get_string(*buf, (u_char**)valp, lvalp)) == 0) {
 		/* Decrement the number of remaining entries. */
 		(*howmany)--;
 		return 1;
@@ -787,7 +787,7 @@ ssh_get_next_variable(int sock, char full,
 }
 
 int
-ssh_delete_variable(int sock, const char *var, u_int lvar, char all)
+ssh_delete_variable(int sock, const char *var, size_t lvar, char all)
 {
 	struct sshbuf *msg;
 	int r;
