@@ -109,9 +109,9 @@ ssh_set_variable(int, const char *, size_t, const char *, size_t);
 int
 ssh_get_variable(int, const char *, size_t, char **, size_t *);
 int
-ssh_get_first_variable(int, const char *, size_t, char, char **, size_t *, char **, size_t *, struct sshbuf **, int *);
+ssh_get_first_variable(int, const char *, size_t, char, char **, size_t *, char **, size_t *, struct sshbuf **, u_int32_t *);
 int
-ssh_get_next_variable(int, char, char **, size_t *, char **, size_t *, struct sshbuf **, int *);
+ssh_get_next_variable(int, char, char **, size_t *, char **, size_t *, struct sshbuf **, u_int32_t *);
 int
 ssh_delete_variable(int, const char *, size_t, char);
 
