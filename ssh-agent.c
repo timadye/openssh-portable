@@ -1818,7 +1818,7 @@ static void
 send_return_code(SocketEntry *e, int code)
 {
 	int r;
-
+	debug("return code %d", code);
 	if ((r = sshbuf_put_u32(e->output, 1)) != 0 ||
 	    (r = sshbuf_put_u8(e->output, code)) != 0)
 		fatal_fr(r, "compose");
@@ -1905,8 +1905,14 @@ process_list_variables(SocketEntry *e, char full)
 	}
 	if ((msg = sshbuf_new()) == NULL)
 		fatal_f("sshbuf_new failed");
+	if (prefix && lprefix > 0)
+		debug("list variables starting with '%.*s'", (int)lprefix, prefix);
+	else
+		debug("list all variables");
 	TAILQ_FOREACH(v, &vartable.varlist, next) {
 		if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
+			if (full) debug("  -> '%.*s' = '%.*s'", (int)v->lvar, v->var, (int)v->lval, v->val);
+			else      debug("  -> '%.*s'",          (int)v->lvar, v->var);
 			if ((r = sshbuf_put_string(msg, v->var, v->lvar)) != 0 ||
 					(r = full ? sshbuf_put_string(msg, v->val, v->lval) : 0) != 0)
 				fatal_fr(r, "compose");
@@ -1957,6 +1963,7 @@ process_remove_variable(SocketEntry *e)
 		return;
 	}
 	if ((v = lookup_variable(var, lvar))) {
+		debug("delete variable '%.*s' with value '%.*s'", (int)v->lvar, v->var, (int)v->lval, v->val);
 		if (vartable.nentries < 1)
 			fatal_f("internal error: vartable.nentries %d", vartable.nentries);
 		TAILQ_REMOVE(&vartable.varlist, v, next);
@@ -1989,6 +1996,7 @@ process_remove_all_variables(SocketEntry *e)
 			last = NULL;
 		}
 		if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
+			debug("delete variable '%.*s' with value '%.*s'", (int)v->lvar, v->var, (int)v->lval, v->val);
 			vartable.nentries--;
 			ndel++;
 			last = v;
