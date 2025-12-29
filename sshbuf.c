@@ -28,6 +28,29 @@
 #include "sshbuf.h"
 #include "misc.h"
 
+#ifdef SSHBUF_DEBUG
+# define SSHBUF_TELL(what) do { \
+		printf("%s:%d %s: %s size %zu alloc %zu off %zu max %zu\n", \
+		    __FILE__, __LINE__, __func__, what, \
+		    buf->size, buf->alloc, buf->off, buf->max_size); \
+		fflush(stdout); \
+	} while (0)
+#else
+# define SSHBUF_TELL(what)
+#endif
+
+struct sshbuf {
+	u_char *d;		/* Data */
+	const u_char *cd;	/* Const data */
+	size_t off;		/* First available byte is buf->d + buf->off */
+	size_t size;		/* Last byte is buf->d + buf->size - 1 */
+	size_t max_size;	/* Maximum size of buffer */
+	size_t alloc;		/* Total bytes allocated to buf->d */
+	int readonly;		/* Refers to external, const data */
+	u_int refcount;		/* Tracks self and number of child buffers */
+	struct sshbuf *parent;	/* If child, pointer to parent */
+};
+
 static inline int
 sshbuf_check_sanity(const struct sshbuf *buf)
 {

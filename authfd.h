@@ -100,6 +100,9 @@ int	ssh_agent_bind_hostkey(int sock, const struct sshkey *key,
 #define SSH2_AGENTC_ADD_ID_CONSTRAINED		25
 #define SSH_AGENTC_ADD_SMARTCARD_KEY_CONSTRAINED 26
 
+/* generic extension mechanism */
+#define SSH_AGENTC_EXTENSION			27
+
 /* ssh-store commands */
 #define SSH_AGENTC_SET_VARIABLE			40
 #define SSH_AGENT_VARIABLE_REPLACED		41
