@@ -82,8 +82,6 @@ LIBOPENSSH_OBJS=\
 	ssh_api.o \
 	ssherr.o \
 	sshbuf.o \
-	buffer.o \
-	bufaux.o \
 	sshkey.o \
 	sshbuf-getput-basic.o \
 	sshbuf-misc.o \

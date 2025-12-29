@@ -76,9 +76,6 @@ int	ssh_agent_sign(int sock, const struct sshkey *key,
 #define SSH2_AGENTC_ADD_ID_CONSTRAINED		25
 #define SSH_AGENTC_ADD_SMARTCARD_KEY_CONSTRAINED 26
 
-/* generic extension mechanism */
-#define SSH_AGENTC_EXTENSION			27
-
 /* ssh-store commands */
 #define SSH_AGENTC_SET_VARIABLE			40
 #define SSH_AGENT_VARIABLE_REPLACED		41
@@ -107,15 +104,14 @@ int	ssh_agent_sign(int sock, const struct sshkey *key,
 #define	SSH_AGENT_RSA_SHA2_256			0x02
 #define	SSH_AGENT_RSA_SHA2_512			0x04
 
-typedef struct sshbuf Buffer;
 int
 ssh_set_variable(int, const char *, u_int, const char *, u_int);
 int
 ssh_get_variable(int, const char *, u_int, char **, u_int *);
 int
-ssh_get_first_variable(int, const char *, u_int, char, char **, u_int *, char **, u_int *, Buffer *, int *);
+ssh_get_first_variable(int, const char *, u_int, char, char **, u_int *, char **, u_int *, struct sshbuf **, int *);
 int
-ssh_get_next_variable(int, char, char **, u_int *, char **, u_int *, Buffer *, int *);
+ssh_get_next_variable(int, char, char **, u_int *, char **, u_int *, struct sshbuf **, int *);
 int
 ssh_delete_variable(int, const char *, u_int, char);
 
