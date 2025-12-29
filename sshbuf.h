@@ -52,13 +52,6 @@ struct sshbuf {
 };
 
 /*
- * NB. Please do not use sshbuf_init() in new code. Please use sshbuf_new()
- * instead. sshbuf_init() is deprecated and will go away soon (it is
- * only included to allow compat with buffer_* in OpenSSH)
- */
-void sshbuf_init(struct sshbuf *buf);
-
-/*
  * Create a new sshbuf buffer.
  * Returns pointer to buffer on success, or NULL on allocation failure.
  */
