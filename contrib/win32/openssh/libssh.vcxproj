@@ -449,8 +449,6 @@
     <ClCompile Include="$(OpenSSH-Src-Path)ssh-ed25519-sk.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)ssh-sk.c" />
     <ClCompile Include="$(OpenSSH-Src-Path)sshbuf-io.c" />
-    <ClCompile Include="$(OpenSSH-Src-Path)bufaux.c" />
-    <ClCompile Include="$(OpenSSH-Src-Path)buffer.c" />
     <ClCompile Include="..\..\..\cipher-chachapoly-libcrypto.c" />
     <ClCompile Include="..\..\..\kex-names.c" />
     <ClCompile Include="..\win32compat\spawn-ext.c" />
