@@ -119,7 +119,7 @@ list_variables(int agent_fd, const char* prefix, u_int lprefix, char full)
 	char *var, *val;
 	u_int lvar, lval;
 	int ok, nvars = 0;
-	Buffer identities;
+	struct sshbuf *identities = NULL;
 	int howmany = 0;
 
 	for (ok = ssh_get_first_variable(agent_fd, prefix, lprefix, full, &var, &lvar, &val, &lval, &identities, &howmany);

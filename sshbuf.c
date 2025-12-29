@@ -28,17 +28,6 @@
 #include "sshbuf.h"
 #include "misc.h"
 
-#ifdef SSHBUF_DEBUG
-# define SSHBUF_TELL(what) do { \
-		printf("%s:%d %s: %s size %zu alloc %zu off %zu max %zu\n", \
-		    __FILE__, __LINE__, __func__, what, \
-		    buf->size, buf->alloc, buf->off, buf->max_size); \
-		fflush(stdout); \
-	} while (0)
-#else
-# define SSHBUF_TELL(what)
-#endif
-
 static inline int
 sshbuf_check_sanity(const struct sshbuf *buf)
 {
@@ -47,7 +36,6 @@ sshbuf_check_sanity(const struct sshbuf *buf)
 	    (!buf->readonly && buf->d != buf->cd) ||
 	    buf->refcount < 1 || buf->refcount > SSHBUF_REFS_MAX ||
 	    buf->cd == NULL ||
-	    (buf->dont_free && (buf->readonly || buf->parent != NULL)) ||
 	    buf->max_size > SSHBUF_SIZE_MAX ||
 	    buf->alloc > buf->max_size ||
 	    buf->size > buf->alloc ||
@@ -147,8 +135,6 @@ sshbuf_fromb(struct sshbuf *buf)
 void
 sshbuf_free(struct sshbuf *buf)
 {
-	int dont_free = 0;
-
 	if (buf == NULL)
 		return;
 	/*
@@ -169,8 +155,6 @@ sshbuf_free(struct sshbuf *buf)
 	if (buf->refcount > 0)
 		return;
 
-	dont_free = buf->dont_free;
-
 	/*
 	 * If we are a child, the free our parent to decrement its reference
 	 * count and possibly free it.
@@ -182,21 +166,7 @@ sshbuf_free(struct sshbuf *buf)
 		explicit_bzero(buf->d, buf->alloc);
 		free(buf->d);
 	}
-	if (!dont_free)
-		freezero(buf, sizeof(*buf));
-}
-
-void
-sshbuf_init(struct sshbuf *ret)
-{
-	explicit_bzero(ret, sizeof(*ret));
-	ret->alloc = SSHBUF_SIZE_INIT;
-	ret->max_size = SSHBUF_SIZE_MAX;
-	ret->readonly = 0;
-	ret->dont_free = 1;
-	ret->refcount = 1;
-	if ((ret->cd = ret->d = calloc(1, ret->alloc)) == NULL)
-		ret->alloc = 0;
+	freezero(buf, sizeof(*buf));
 }
 
 void

@@ -1710,7 +1710,7 @@ process_list_variables(SocketEntry *e, char full)
 	u_int lprefix, nret = 0;
 	Variable *v;
 
-	if ((r = sshbuf_get_string(e->request, &prefix, &lprefix)) != 0)
+	if ((r = sshbuf_get_string(e->request, &prefix, &lprefix)) != 0) {
 		error_fr(r, "parse");
 		send_return_code(e, SSH_AGENT_FAILURE);
 		return;
@@ -1749,7 +1749,7 @@ no_variables(SocketEntry *e, u_int type)
 	if ((r = sshbuf_put_u8(msg, (type == SSH_AGENTC_LIST_VARIABLES) ? SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER)) != 0 ||
 	    (r = sshbuf_put_u32(&msg, 0)) != 0 ||
 	    (r = sshbuf_put_u32(e->output, sshbuf_len(msg))) != 0 ||
-	    (r = sshbuf_put(e->output, sshbuf_ptr(msg), sshbuf_len(msg))) != 0) ||
+	    (r = sshbuf_put(e->output, sshbuf_ptr(msg), sshbuf_len(msg))) != 0)
 		fatal_fr(r, "compose");
 	sshbuf_free(msg);
 }
@@ -1790,12 +1790,11 @@ process_remove_all_variables(SocketEntry *e)
 	Variable *v, *last = NULL;
 	int r;
 
-	if ((r = sshbuf_get_string(e->request, &prefix, &lprefix)) != 0)
+	if ((r = sshbuf_get_string(e->request, &prefix, &lprefix)) != 0) {
 		error_fr(r, "parse");
 		send_return_code(e, SSH_AGENT_FAILURE);
 		return;
 	}
-	r = sshbuf_get_string(e->request, &prefix, &lprefix);
 	TAILQ_FOREACH(v, &vartable.varlist, next) {
 		if (last) {   /* don't remove variable until we've moved past it */
 			TAILQ_REMOVE(&vartable.varlist, last, next);
