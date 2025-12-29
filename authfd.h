@@ -128,14 +128,14 @@ int	ssh_agent_bind_hostkey(int sock, const struct sshkey *key,
 #define	SSH_AGENT_RSA_SHA2_512			0x04
 
 int
-ssh_set_variable(int, const char *, u_int, const char *, u_int);
+ssh_set_variable(int, const char *, size_t, const char *, size_t);
 int
-ssh_get_variable(int, const char *, u_int, char **, u_int *);
+ssh_get_variable(int, const char *, size_t, char **, size_t *);
 int
-ssh_get_first_variable(int, const char *, u_int, char, char **, u_int *, char **, u_int *, struct sshbuf **, int *);
+ssh_get_first_variable(int, const char *, size_t, char, char **, size_t *, char **, size_t *, struct sshbuf **, int *);
 int
-ssh_get_next_variable(int, char, char **, u_int *, char **, u_int *, struct sshbuf **, int *);
+ssh_get_next_variable(int, char, char **, size_t *, char **, size_t *, struct sshbuf **, int *);
 int
-ssh_delete_variable(int, const char *, u_int, char);
+ssh_delete_variable(int, const char *, size_t, char);
 
 #endif				/* AUTHFD_H */
