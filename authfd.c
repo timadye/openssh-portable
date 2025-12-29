@@ -802,8 +802,8 @@ ssh_delete_variable(int sock, const char *var, size_t lvar, char all)
 	if ((r = sshbuf_put_u8(msg, all ? SSH_AGENTC_REMOVE_ALL_VARIABLES : SSH_AGENTC_REMOVE_VARIABLE)) == 0 &&
 	    (r = sshbuf_put_string(msg, var, lvar)) == 0 &&
 	    (r = ssh_request_reply(sock, msg, msg)) == 0 &&
-		  (r = sshbuf_get_u8(msg, &type))) {
-		r = (var && type == SSH_AGENT_NO_VARIABLE) ? 1 : decode_reply(type);
+	    (r = sshbuf_get_u8(msg, &type)) == 0) {
+		r = (type == SSH_AGENT_NO_VARIABLE) ? 1 : decode_reply(type);
 	}
 	sshbuf_free(msg);
 	return r;
