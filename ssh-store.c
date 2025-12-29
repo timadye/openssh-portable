@@ -106,7 +106,7 @@ print_variable(int agent_fd, const char *var, size_t lvar)
 	size_t lval = 0;
 
 	ret = ssh_get_variable(agent_fd, var, lvar, &val, &lval);
-	if (ret && val) {
+	if (ret == 0 && val) {
 		fwrite (val, 1, lval, stdout);
 		free(val);
 	}
