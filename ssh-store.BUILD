@@ -14,7 +14,7 @@ Alma9 build from openssh-portable git repo
   cd openssh-portable
   git checkout V_8_7_P1
   wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-alma9.patch
-  patch < ssh-store7-alma9.patch
+  patch -p1 < ssh-store7-alma9.patch
   sudo dnf install openssl-devel zlib-devel pam-devel
   autoreconf
   ./configure
@@ -91,13 +91,14 @@ persistent and specific for each user connecting with ssh-add/ssh-store.
   cd openssh-portable
   git checkout v9.5.0.0
   wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-win32.patch
-  patch < ssh-store7-win32.patch
+  patch -p1 < ssh-store7-win32.patch
 2. Start Visual Studio 2022
 3. Open contrib\win32\openssh\Win32-OpenSSH.sln
 4. Switch to Release build
 5. Build Solution
-6. install:
+6. install in a user directory:
   cd bin\x64\Release
+  mkdir C:\Apps\OpenSSH
   copy *.exe C:\Apps\OpenSSH
   copy *.txt C:\Apps\OpenSSH
 7. configure custom ssh-agent service from an Administrator Command Prompt:
