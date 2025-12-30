@@ -1170,7 +1170,7 @@ process_get_variable(struct sshbuf* request, struct sshbuf* response, struct age
 	    (stage++, (r = RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &reg)) != ERROR_SUCCESS) ||
 	    (stage++, (r = RegQueryValueExA(reg, svar, 0, &type, NULL, &lval)) != ERROR_SUCCESS) ||
 	    (stage++, (type != REG_BINARY)) ||
-	    (stage++, (val = malloc(lval)) != NULL) ||
+	    (stage++, (val = malloc(lval)) == NULL) ||
 	    (stage++, (r = RegQueryValueExA(reg, svar, 0, NULL, val, &lval)) != ERROR_SUCCESS)) {
 		if (stage == 3 || stage == 4) {
 			debug("variable '%.*s' not found", lvar, var);
