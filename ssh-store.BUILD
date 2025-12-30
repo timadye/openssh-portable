@@ -67,13 +67,13 @@ only one that changes between CentOS7 and Alma9.
 Cygwin build
 ============
 
-1. Use setup.exe to install openssh src files and build pre-requisites:
-  /setup-x86_64.exe -q -P openssh -s
+1. Use setup.exe to install openssh src files and build pre-requisites (requires Administrator mode, unless -B is used):
   /setup-x86_64.exe -q -P cygport,autoconf,automake,gcc-g++,make,libcrypt-devel,libedit-devel,libfido2-devel,libkrb5-devel,libssl-devel,zlib-devel
+  /setup-x86_64.exe -q -I -P openssh
 2.
   cd /usr/src/openssh-10.2p1-1.src
-  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/ssh-store7-cygwin.patch
-  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/openssh-10.2p1-1-x86_64-store7.cygport.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/cygwin/ssh-store7-cygwin.patch
+  wget --no-check-certificate https://hepunx.rl.ac.uk/~adye/software/cygwin/openssh-10.2p1-1-x86_64-store7.cygport.patch
   patch < openssh-10.2p1-1-x86_64-store7.cygport.patch
   mkdir patches
   mv ssh-store7-cygwin.patch patches/
