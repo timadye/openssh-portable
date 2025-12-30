@@ -1001,7 +1001,7 @@ index d8977a15d..bea38f1bf 100644
  		debug("unknown agent request %d", type);
  		r = -1;
 diff --git a/contrib/win32/win32compat/ssh-agent/keyagent-request.c b/contrib/win32/win32compat/ssh-agent/keyagent-request.c
-index 0304f589f..96da7e961 100644
+index 0304f589f..8ec9c33e7 100644
 --- a/contrib/win32/win32compat/ssh-agent/keyagent-request.c
 +++ b/contrib/win32/win32compat/ssh-agent/keyagent-request.c
 @@ -1068,4 +1068,290 @@ int process_keyagent_request(struct sshbuf* request, struct sshbuf* response, st
@@ -1096,7 +1096,7 @@ index 0304f589f..96da7e961 100644
 +	    (stage++, (r = RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &reg)) != ERROR_SUCCESS) ||
 +	    (stage++, (r = RegQueryValueExA(reg, svar, 0, &type, NULL, &lval)) != ERROR_SUCCESS) ||
 +	    (stage++, (type != REG_BINARY)) ||
-+	    (stage++, (val = malloc(lval)) != NULL) ||
++	    (stage++, (val = malloc(lval)) == NULL) ||
 +	    (stage++, (r = RegQueryValueExA(reg, svar, 0, NULL, val, &lval)) != ERROR_SUCCESS)) {
 +		if (stage == 3 || stage == 4) {
 +			debug("variable '%.*s' not found", lvar, var);
