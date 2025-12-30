@@ -1639,7 +1639,7 @@ send_return_code(SocketEntry *e, int code)
 static void
 process_set_variable(SocketEntry *e)
 {
-	size_t lvar, lval;
+	size_t lvar = 0, lval = 0;
 	char *var = NULL, *val = NULL;
 	Variable *v;
 	int r, ret = SSH_AGENT_FAILURE;
@@ -1672,7 +1672,7 @@ process_set_variable(SocketEntry *e)
 static void
 process_get_variable(SocketEntry *e)
 {
-	size_t lvar;
+	size_t lvar = 0;
 	char *var = NULL;
 	Variable *v;
 	struct sshbuf *msg;
@@ -1707,20 +1707,17 @@ process_list_variables(SocketEntry *e, char full)
 	struct sshbuf *msg, *msg2;
 	int r;
 	char *prefix = NULL;
-	size_t lprefix, nret = 0;
+	size_t lprefix = 0, nret = 0;
 	Variable *v;
 
-	if ((r = sshbuf_get_string(e->request, (u_char**)&prefix, &lprefix)) != 0) {
-		error_fr(r, "parse");
-		send_return_code(e, SSH_AGENT_FAILURE);
-		return;
-	}
-	if ((msg = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new failed");
-	if (prefix && lprefix > 0)
+	if ((r = sshbuf_get_string(e->request, (u_char**)&prefix, &lprefix)) != 0)
+		lprefix = 0;
+	if (lprefix > 0)
 		debug("list variables starting with '%.*s'", (int)lprefix, prefix);
 	else
 		debug("list all variables");
+	if ((msg = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new failed");
 	TAILQ_FOREACH(v, &vartable.varlist, next) {
 		if (lprefix == 0 || (v->lvar >= lprefix && 0 == memcmp (v->var, prefix, lprefix))) {
 			if (full) debug("  -> '%.*s' = '%.*s'", (int)v->lvar, v->var, (int)v->lval, v->val);
@@ -1764,7 +1761,7 @@ no_variables(SocketEntry *e, size_t type)
 static void
 process_remove_variable(SocketEntry *e)
 {
-	size_t lvar;
+	size_t lvar = 0;
 	char *var = NULL;
 	Variable *v;
 	int r, ret;
@@ -1792,15 +1789,12 @@ static void
 process_remove_all_variables(SocketEntry *e)
 {
 	char *prefix = NULL;
-	size_t lprefix, ndel = 0;
+	size_t lprefix = 0, ndel = 0;
 	Variable *v, *last = NULL;
 	int r;
 
-	if ((r = sshbuf_get_string(e->request, (u_char**)&prefix, &lprefix)) != 0) {
-		error_fr(r, "parse");
-		send_return_code(e, SSH_AGENT_FAILURE);
-		return;
-	}
+	if ((r = sshbuf_get_string(e->request, (u_char**)&prefix, &lprefix)) != 0)
+		lprefix = 0;
 	TAILQ_FOREACH(v, &vartable.varlist, next) {
 		if (last) {   /* don't remove variable until we've moved past it */
 			TAILQ_REMOVE(&vartable.varlist, last, next);
