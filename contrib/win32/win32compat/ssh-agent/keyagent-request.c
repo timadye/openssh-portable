@@ -1081,8 +1081,8 @@ int
 process_set_variable(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
 {
 	size_t lvar = 0, lval = 0;
-	DWORD loldval = 0, oldtype = 0;
-	char *var = 0, *val = 0;
+	DWORD leval = 0, oldtype = 0;
+	char *var = NULL, *val = NULL, *eval = NULL;
 	LPSTR svar = 0;
 	int r, ret = SSH_AGENT_FAILURE;
 	int replace = 0, stage = 0;
@@ -1101,16 +1101,17 @@ process_set_variable(struct sshbuf* request, struct sshbuf* response, struct age
 		memset(&sa, 0, sizeof(SECURITY_ATTRIBUTES));
 		sa.nLength = sizeof(sa);
 		if ((stage++, !ConvertStringSecurityDescriptorToSecurityDescriptorW(REG_KEY_SDDL, SDDL_REVISION_1, &sa.lpSecurityDescriptor, &sa.nLength)) ||
+		    (stage++, convert_blob(con, val, (DWORD)lval, &eval, &leval, 1) != 0) ||
 		    (stage++, (r = get_user_root(con, &user_root)) != 0) ||
 		    (stage++, (r = RegCreateKeyExW(user_root, SSH_VARIABLES_ROOT, 0, 0, 0, KEY_WRITE | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &sa, &reg, NULL)) != ERROR_SUCCESS))
 			error_f("error %d at stage %d setting '%.*s' = '%.*s'", r, stage, lvar, var, lval, val);
 		else {
-			replace = (RegQueryValueExA(reg, svar, 0, &oldtype, NULL, &loldval) == ERROR_SUCCESS && oldtype == REG_BINARY);
-			if ((r = RegSetValueExA(reg, svar, 0, REG_BINARY, val, (DWORD)lval)) != ERROR_SUCCESS)
+			replace = (RegQueryValueExA(reg, svar, 0, &oldtype, NULL, NULL) == ERROR_SUCCESS && oldtype == REG_BINARY);
+			if ((r = RegSetValueExA(reg, svar, 0, REG_BINARY, eval, leval)) != ERROR_SUCCESS)
 				error_f("RegSetValueExA error %d setting '%.*s' = '%.*s'", r, lvar, var, lval, val);
 			else {
 				if (replace) {
-					debug("set '%.*s' = '%.*s' (replacing %d-byte old value)", lvar, var, lval, val, loldval);
+					debug("set '%.*s' = '%.*s' (replacing old value)", lvar, var, lval, val);
 					ret = SSH_AGENT_VARIABLE_REPLACED;
 				} else {
 					debug("set '%.*s' = '%.*s'", lvar, var, lval, val);
@@ -1123,8 +1124,12 @@ process_set_variable(struct sshbuf* request, struct sshbuf* response, struct age
 	if (reg) RegCloseKey(reg);
 	if (user_root) RegCloseKey(user_root);
 	if (sa.lpSecurityDescriptor) LocalFree(sa.lpSecurityDescriptor);
+	free(eval);
 	free(svar);
-	free(val);
+	if (val) {
+		memset(val, 0, lval);
+		free(val);
+	}
 	free(var);
 
 	send_return_code(response, ret);
@@ -1136,8 +1141,8 @@ int
 process_get_variable(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
 {
 	size_t lvar = 0;
-	DWORD lval = 0, type = 0;
-	char *var = 0, *val = 0;
+	DWORD leval = 0, lval = 0, type = 0;
+	char *var = NULL, *val = NULL, *eval = NULL;
 	LPSTR svar = 0;
 	int r, success = 0, stage = 0;
 	HKEY reg = 0, user_root = 0;
@@ -1154,14 +1159,15 @@ process_get_variable(struct sshbuf* request, struct sshbuf* response, struct age
 	svar[lvar] = '\0';
 	if ((stage++, (r = get_user_root(con, &user_root)) != 0) ||
 	    (stage++, (r = RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_WOW64_64KEY, &reg)) != ERROR_SUCCESS) ||
-	    (stage++, (r = RegQueryValueExA(reg, svar, 0, &type, NULL, &lval)) != ERROR_SUCCESS) ||
+	    (stage++, (r = RegQueryValueExA(reg, svar, 0, &type, NULL, &leval)) != ERROR_SUCCESS) ||
 	    (stage++, (type != REG_BINARY)) ||
-	    (stage++, (val = malloc(lval)) == NULL) ||
-	    (stage++, (r = RegQueryValueExA(reg, svar, 0, NULL, val, &lval)) != ERROR_SUCCESS)) {
+	    (stage++, (eval = malloc(leval)) == NULL) ||
+	    (stage++, (r = RegQueryValueExA(reg, svar, 0, NULL, eval, &leval)) != ERROR_SUCCESS) ||
+	    (stage++, (convert_blob(con, eval, leval, &val, &lval, FALSE) != 0))) {
 		if (stage == 3 || stage == 4) {
 			debug("variable '%.*s' not found", lvar, var);
 		} else {
-			debug_f("error %d at stage %d getting variable '%.*s'", r, stage, lvar, var);
+			error_f("error %d at stage %d getting variable '%.*s'", r, stage, lvar, var);
 		}
 		send_return_code(response, SSH_AGENT_NO_VARIABLE);
 	} else {
@@ -1171,7 +1177,11 @@ process_get_variable(struct sshbuf* request, struct sshbuf* response, struct age
 			fatal_fr(r, "compose");
 	}
 
-	free(val);
+	free(eval);
+	if (val) {
+		memset(val, 0, lval);
+		free(val);
+	}
 	free(svar);
 	free(var);
 	if (reg) RegCloseKey(reg);
@@ -1184,11 +1194,11 @@ int
 process_list_variables(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con, char full)
 {
 	struct sshbuf *msg = NULL;
-	char *prefix = NULL, *var = NULL, *val = NULL;
+	char *prefix = NULL, *var = NULL, *val = NULL, *eval = NULL;
 	size_t lprefix = 0;
 	u_int nret = 0;
 	int r, ret = SSH_AGENT_FAILURE, stage = 0;
-	DWORD nvar = 0, maxvar = 0, maxval = 0, index = 0, lvar, lval, type;
+	DWORD nvar = 0, maxvar = 0, maxval = 0, index = 0, lvar, lval = 0, leval, type;
 	HKEY reg = 0, user_root = 0;
 
 	if ((stage++, (r = get_user_root(con, &user_root)) != 0) ||
@@ -1199,8 +1209,8 @@ process_list_variables(struct sshbuf* request, struct sshbuf* response, struct a
 		var = malloc(++maxvar);
 		if (!var) fatal_f("malloc failed");
 		if (full) {
-			val = malloc(maxval);
-			if (!val) fatal_f("malloc failed");
+			eval = malloc(maxval);
+			if (!eval) fatal_f("malloc failed");
 		}
 		if ((r = sshbuf_get_string(request, (u_char**)&prefix, &lprefix)) != 0)
 			lprefix = 0;
@@ -1211,11 +1221,15 @@ process_list_variables(struct sshbuf* request, struct sshbuf* response, struct a
 		if ((msg = sshbuf_new()) == NULL) fatal_f("sshbuf_new failed");
 		while (1) {
 			lvar = maxvar;  // includes space for terminating \0 of largest variable name
-			lval = maxval;
+			leval = maxval;
 			type = 0;
-			if ((r = RegEnumValueA(reg, index++, var, &lvar, NULL, &type, val, full ? &lval : NULL)) != ERROR_SUCCESS) {
-				debug_f("RegEnumValueA return code %d", r);
+			if ((r = RegEnumValueA(reg, index++, var, &lvar, NULL, &type, eval, full ? &leval : NULL)) != ERROR_SUCCESS) {
+				error_f("RegEnumValueA return code %d", r);
 				break;
+			}
+			if (full && convert_blob(con, eval, leval, &val, &lval, FALSE) != 0) {
+				error_f("convert_blob failed for '%.*s'", lvar, var);
+				continue;
 			}
 			if (type == REG_BINARY &&
 			    (lprefix == 0 || (lvar >= lprefix && 0 == memcmp (var, prefix, lprefix)))) {
@@ -1227,8 +1241,14 @@ process_list_variables(struct sshbuf* request, struct sshbuf* response, struct a
 				nret++;
 			} else
 				debug_f("skip variable '%.*s'", lvar, var);
+			if (val) {
+				memset(val, 0, lval);
+				free(val);
+				val = NULL;
+			}
+			lval = 0;
 		}
-		free(val);
+		free(eval);
 		free(var);
 		free(prefix);
 		ret = full ? SSH_AGENT_VARIABLES_ANSWER : SSH_AGENT_VARIABLE_NAMES_ANSWER;
@@ -1250,7 +1270,7 @@ int
 process_remove_variable(struct sshbuf* request, struct sshbuf* response, struct agent_connection* con)
 {
 	size_t lvar = 0;
-	DWORD type = 0, lval = 0;
+	DWORD type = 0;
 	char *var = 0;
 	LPSTR svar = 0;
 	int r, stage = 0, ret = SSH_AGENT_FAILURE;
@@ -1265,7 +1285,7 @@ process_remove_variable(struct sshbuf* request, struct sshbuf* response, struct 
 		svar[lvar] = '\0';
 		if ((stage++, (r = get_user_root(con, &user_root)) != 0) ||
 		    (stage++, (r = RegOpenKeyExW(user_root, SSH_VARIABLES_ROOT, 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_64KEY, &reg)) != ERROR_SUCCESS) ||
-		    (stage++, (r = RegQueryValueExA(reg, svar, 0, &type, NULL, &lval)) != ERROR_SUCCESS) ||
+		    (stage++, (r = RegQueryValueExA(reg, svar, 0, &type, NULL, NULL)) != ERROR_SUCCESS) ||
 		    (stage++, (type != REG_BINARY))) {
 			if (stage == 3 || stage == 4) {
 				debug("variable '%.*s' to delete not found", lvar, var);
@@ -1275,9 +1295,9 @@ process_remove_variable(struct sshbuf* request, struct sshbuf* response, struct 
 			ret = SSH_AGENT_NO_VARIABLE;
 		} else {
 			if ((r = RegDeleteValueA (reg, svar)) != ERROR_SUCCESS) {
-				error_f ("RegDeleteValueA error %d deleting variable '%.*s' (length %d)", r, lvar, var, lval);
+				error_f ("RegDeleteValueA error %d deleting variable '%.*s'", r, lvar, var);
 			} else {
-				debug("deleted variable '%.*s' (length %d)", lvar, var, lval);
+				debug("deleted variable '%.*s'", lvar, var);
 				ret = SSH_AGENT_SUCCESS;
 			}
 		}
