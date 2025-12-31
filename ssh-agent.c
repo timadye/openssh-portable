@@ -2062,6 +2062,7 @@ process_get_variable(SocketEntry *e)
 				(r = sshbuf_putb(e->output, msg)) != 0)
 			fatal_fr(r, "compose");
 		sshbuf_free(msg);
+		explicit_bzero(val, v->lval);
 		free(val);
 	} else {
 		debug("variable '%.*s' not found", (int)lvar, var);
@@ -2096,6 +2097,7 @@ process_list_variables(SocketEntry *e, char full)
 				    (r = sshbuf_put_string(msg, val, v->lval)) != 0)
 					fatal_fr(r, "compose");
 				debug("  -> '%.*s' = '%.*s'", (int)v->lvar, v->var, (int)v->lval, val);
+				explicit_bzero(val, v->lval);
 				free(val);
 			} else {
 				debug("  -> '%.*s'",          (int)v->lvar, v->var);
